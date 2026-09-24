@@ -1,0 +1,8 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.local
+dist/
+*.mp4
+.DS_Store
