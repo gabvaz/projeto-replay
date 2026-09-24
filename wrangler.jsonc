@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "projeto-replay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-24",
+  "account_id": "10a01444ca41e5cf404c639da84eb47e",
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true
+    }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "replay-db",
+      "database_id": "ef8f09c2-b761-40be-a856-42efa8c22bd1",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "CLIPS",
+      "bucket_name": "replay-clips"
+    }
+  ]
+}
