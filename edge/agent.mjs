@@ -15,11 +15,13 @@
  * Env: API_BASE, COURT_KEY, RTSP_URL, EDGE_PORT, PRE_ROLL_SEC, POST_ROLL_SEC, SEGMENT_SEC, OPEN_UI
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, readdir, rm, writeFile, stat, readFile } from "node:fs/promises";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import readline from "node:readline";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,6 +77,86 @@ function log(...args) {
 
 function redactUrl(url) {
   return url.replace(/:([^:@/]+)@/, ":***@");
+}
+
+/** Resolve ffmpeg mesmo se o terminal não tiver PATH atualizado (WinGet). */
+function resolveFfmpegBin() {
+  if (process.env.FFMPEG_PATH && existsSync(process.env.FFMPEG_PATH)) {
+    return process.env.FFMPEG_PATH;
+  }
+
+  const which = spawnSync(process.platform === "win32" ? "where" : "which", ["ffmpeg"], {
+    encoding: "utf8",
+    shell: true,
+  });
+  if (which.status === 0) {
+    const first = which.stdout
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .find(Boolean);
+    if (first && existsSync(first)) return first;
+  }
+
+  const wingetRoot = path.join(
+    process.env.LOCALAPPDATA ?? path.join(homedir(), "AppData", "Local"),
+    "Microsoft",
+    "WinGet",
+    "Packages",
+  );
+  if (existsSync(wingetRoot)) {
+    const stack = [wingetRoot];
+    let steps = 0;
+    while (stack.length && steps < 400) {
+      steps += 1;
+      const dir = stack.pop();
+      let entries;
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const ent of entries) {
+        const full = path.join(dir, ent.name);
+        if (ent.isFile() && ent.name.toLowerCase() === "ffmpeg.exe") return full;
+        if (ent.isFile() && ent.name === "ffmpeg") return full;
+        if (
+          ent.isDirectory() &&
+          (ent.name.startsWith("Gyan") ||
+            ent.name.startsWith("ffmpeg") ||
+            ent.name.includes("full_build") ||
+            ent.name === "bin")
+        ) {
+          stack.push(full);
+        }
+      }
+    }
+  }
+
+  for (const g of [
+    path.join(process.env.ProgramFiles ?? "C:\\Program Files", "ffmpeg", "bin", "ffmpeg.exe"),
+    "C:\\ffmpeg\\bin\\ffmpeg.exe",
+  ]) {
+    if (existsSync(g)) return g;
+  }
+
+  return null;
+}
+
+const FFMPEG_BIN = resolveFfmpegBin();
+if (!FFMPEG_BIN) {
+  console.error(
+    "ffmpeg não encontrado. Abra um terminal NOVO após instalar, ou no edge/.env:\n" +
+      "FFMPEG_PATH=C:\\\\caminho\\\\para\\\\ffmpeg.exe",
+  );
+  process.exit(1);
+}
+
+function spawnFfmpeg(args, opts = {}) {
+  const proc = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "inherit", "inherit"], ...opts });
+  proc.on("error", (err) => {
+    log("ffmpeg spawn error:", err.message ?? err);
+  });
+  return proc;
 }
 
 async function ensureDirs() {
@@ -151,8 +233,9 @@ function startBuffer() {
     log("fonte: testsrc (sem RTSP_URL)");
   }
 
+  log("ffmpeg:", FFMPEG_BIN);
   log("starting ffmpeg buffer →", BUFFER_DIR);
-  ffmpegProc = spawn("ffmpeg", args, { stdio: ["ignore", "inherit", "inherit"] });
+  ffmpegProc = spawnFfmpeg(args);
   ffmpegProc.on("exit", (code, signal) => {
     log(`ffmpeg exited code=${code} signal=${signal}`);
   });
@@ -188,25 +271,21 @@ async function buildClip() {
   await writeFile(listPath, listBody, "utf8");
 
   await new Promise((resolve, reject) => {
-    const proc = spawn(
-      "ffmpeg",
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        listPath,
-        "-c",
-        "copy",
-        outPath,
-      ],
-      { stdio: ["ignore", "inherit", "inherit"] },
-    );
+    const proc = spawnFfmpeg([
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      listPath,
+      "-c",
+      "copy",
+      outPath,
+    ]);
     proc.on("exit", (code) => {
       if (code === 0) resolve();
       else reject(new Error(`ffmpeg concat exit ${code}`));
