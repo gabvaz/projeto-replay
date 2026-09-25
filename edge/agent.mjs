@@ -242,7 +242,7 @@ async function uploadClip(filePath) {
   };
 }
 
-async function handleReplay(source = "api", requestId = null) {
+async function handleReplay(source = "api") {
   if (busy) {
     log("replay ignorado (busy)");
     return { ok: false, error: "busy" };
@@ -250,70 +250,20 @@ async function handleReplay(source = "api", requestId = null) {
   busy = true;
   const t0 = Date.now();
   try {
-    log(
-      `replay trigger (${source}${requestId ? ` ${requestId}` : ""}) — post-roll ${POST_ROLL_SEC}s`,
-    );
+    log(`replay trigger (${source}) — post-roll ${POST_ROLL_SEC}s`);
     await new Promise((r) => setTimeout(r, POST_ROLL_SEC * 1000));
     const clipPath = await buildClip();
     log("clip gerado:", clipPath);
     const uploaded = await uploadClip(clipPath);
     log("uploaded:", uploaded);
-    if (requestId) {
-      await finishRequest(requestId, { ok: true, clip_id: uploaded.clip_id });
-    }
     log(`done in ${Date.now() - t0}ms`);
     return { ok: true, ...uploaded };
   } catch (err) {
     log("replay failed:", err.message ?? err);
-    if (requestId) {
-      await finishRequest(requestId, {
-        ok: false,
-        error: String(err.message ?? err),
-      }).catch((e) => log("finishRequest failed:", e.message ?? e));
-    }
     return { ok: false, error: String(err.message ?? err) };
   } finally {
     busy = false;
   }
-}
-
-async function finishRequest(requestId, payload) {
-  const res = await fetch(`${API_BASE}/edge/requests/${requestId}/finish`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    throw new Error(`finish ${res.status}: ${await res.text()}`);
-  }
-  return res.json();
-}
-
-async function pollCloudTriggers() {
-  if (busy) return;
-  try {
-    const res = await fetch(
-      `${API_BASE}/edge/pending?court_key=${encodeURIComponent(COURT_KEY)}`,
-    );
-    if (!res.ok) {
-      log("pending poll error:", res.status, await res.text());
-      return;
-    }
-    const data = await res.json();
-    if (!data.request?.id) return;
-    log("cloud trigger claimed:", data.request.id);
-    await handleReplay("cloud", data.request.id);
-  } catch (err) {
-    log("poll failed:", err.message ?? err);
-  }
-}
-
-function startCloudPoll() {
-  const ms = Number(process.env.POLL_MS ?? 1500);
-  log(`polling cloud triggers every ${ms}ms`);
-  setInterval(() => {
-    void pollCloudTriggers();
-  }, ms);
 }
 
 function startHttp() {
@@ -335,7 +285,7 @@ function startHttp() {
   });
   server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
-      log(`porta ${EDGE_PORT} ocupada — API local desligada; cloud poll segue ativo`);
+      log(`porta ${EDGE_PORT} ocupada — API local não subiu`);
       return;
     }
     throw err;
@@ -376,7 +326,6 @@ await ensureDirs();
 startBuffer();
 startHttp();
 startKeyboard();
-startCloudPoll();
 
-// warm-up: espera alguns segmentos antes de aceitar replay “bom”
 log(`warming buffer ~${PRE_ROLL_SEC + 5}s...`);
+log("trigger: POST /local/replay | Enter/Espaço/R (sem poll cloud)");
