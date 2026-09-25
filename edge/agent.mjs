@@ -1,30 +1,58 @@
 /**
- * Edge agent (dev) — buffer circular com fonte sintética + upload pro Worker.
+ * Edge agent (dev) — buffer circular + upload pro Worker.
+ *
+ * Fonte:
+ *   - RTSP_URL definido (edge/.env) → câmera
+ *   - senão → testsrc sintético
  *
  * Uso:
  *   npm run edge
- *   # em outro terminal / curl:
  *   curl -X POST http://127.0.0.1:8788/local/replay
- *   # ou aperta Enter neste processo
+ *   # ou Enter/Espaço/R neste processo
  *
- * Env (opcional):
- *   API_BASE, COURT_KEY, EDGE_PORT, PRE_ROLL_SEC, POST_ROLL_SEC, SEGMENT_SEC
+ * Env: API_BASE, COURT_KEY, RTSP_URL, EDGE_PORT, PRE_ROLL_SEC, POST_ROLL_SEC, SEGMENT_SEC
  */
 
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdir, readdir, rm, writeFile, stat } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile, stat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import readline from "node:readline";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+async function loadDotEnv() {
+  try {
+    const raw = await readFile(path.join(__dirname, ".env"), "utf8");
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq < 1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let val = trimmed.slice(eq + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  } catch {
+    // .env opcional
+  }
+}
+
+await loadDotEnv();
+
 const API_BASE = (
   process.env.API_BASE ??
   "https://projeto-replay.gabrieltenoriovaz-10a.workers.dev"
 ).replace(/\/$/, "");
 const COURT_KEY = process.env.COURT_KEY ?? "demo01";
+const RTSP_URL = process.env.RTSP_URL?.trim() || "";
 const EDGE_PORT = Number(process.env.EDGE_PORT ?? 8788);
 const PRE_ROLL_SEC = Number(process.env.PRE_ROLL_SEC ?? 15);
 const POST_ROLL_SEC = Number(process.env.POST_ROLL_SEC ?? 3);
@@ -43,42 +71,24 @@ function log(...args) {
   console.log(new Date().toISOString(), ...args);
 }
 
+function redactUrl(url) {
+  return url.replace(/:([^:@/]+)@/, ":***@");
+}
+
 async function ensureDirs() {
-  await rm(BUFFER_DIR, { recursive: true, force: true });
+  try {
+    await rm(BUFFER_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  } catch (err) {
+    log("warn: limpeza buffer falhou:", err.message ?? err);
+  }
   await mkdir(BUFFER_DIR, { recursive: true });
   await mkdir(CLIPS_DIR, { recursive: true });
 }
 
 function startBuffer() {
   const pattern = path.join(BUFFER_DIR, "seg_%03d.ts");
-  const args = [
-    "-hide_banner",
-    "-loglevel",
-    "error",
-    "-y",
-    "-f",
-    "lavfi",
-    "-i",
-    "testsrc=size=1280x720:rate=30",
-    "-f",
-    "lavfi",
-    "-i",
-    "sine=frequency=880:sample_rate=44100",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "ultrafast",
-    "-tune",
-    "zerolatency",
-    "-pix_fmt",
-    "yuv420p",
-    "-g",
-    "60",
-    "-keyint_min",
-    "60",
-    "-c:a",
-    "aac",
-    "-shortest",
+  const segmentTail = [
+    "-an",
     "-f",
     "segment",
     "-segment_time",
@@ -91,6 +101,53 @@ function startBuffer() {
     "mpegts",
     pattern,
   ];
+
+  /** @type {string[]} */
+  let args;
+  if (RTSP_URL) {
+    // Yoosee/iCSee: UDP; vídeo H.264 copy; drop áudio pcm_alaw
+    args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-rtsp_transport",
+      "udp",
+      "-i",
+      RTSP_URL,
+      "-map",
+      "0:v:0",
+      "-c:v",
+      "copy",
+      ...segmentTail,
+    ];
+    log("fonte: RTSP", redactUrl(RTSP_URL));
+  } else {
+    args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      "testsrc=size=1280x720:rate=30",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-tune",
+      "zerolatency",
+      "-pix_fmt",
+      "yuv420p",
+      "-g",
+      "60",
+      "-keyint_min",
+      "60",
+      ...segmentTail,
+    ];
+    log("fonte: testsrc (sem RTSP_URL)");
+  }
 
   log("starting ffmpeg buffer →", BUFFER_DIR);
   ffmpegProc = spawn("ffmpeg", args, { stdio: ["ignore", "inherit", "inherit"] });
@@ -185,7 +242,7 @@ async function uploadClip(filePath) {
   };
 }
 
-async function handleReplay(source = "api") {
+async function handleReplay(source = "api", requestId = null) {
   if (busy) {
     log("replay ignorado (busy)");
     return { ok: false, error: "busy" };
@@ -193,20 +250,70 @@ async function handleReplay(source = "api") {
   busy = true;
   const t0 = Date.now();
   try {
-    log(`replay trigger (${source}) — aguardando post-roll ${POST_ROLL_SEC}s`);
+    log(
+      `replay trigger (${source}${requestId ? ` ${requestId}` : ""}) — post-roll ${POST_ROLL_SEC}s`,
+    );
     await new Promise((r) => setTimeout(r, POST_ROLL_SEC * 1000));
     const clipPath = await buildClip();
     log("clip gerado:", clipPath);
     const uploaded = await uploadClip(clipPath);
     log("uploaded:", uploaded);
+    if (requestId) {
+      await finishRequest(requestId, { ok: true, clip_id: uploaded.clip_id });
+    }
     log(`done in ${Date.now() - t0}ms`);
     return { ok: true, ...uploaded };
   } catch (err) {
     log("replay failed:", err.message ?? err);
+    if (requestId) {
+      await finishRequest(requestId, {
+        ok: false,
+        error: String(err.message ?? err),
+      }).catch((e) => log("finishRequest failed:", e.message ?? e));
+    }
     return { ok: false, error: String(err.message ?? err) };
   } finally {
     busy = false;
   }
+}
+
+async function finishRequest(requestId, payload) {
+  const res = await fetch(`${API_BASE}/edge/requests/${requestId}/finish`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(`finish ${res.status}: ${await res.text()}`);
+  }
+  return res.json();
+}
+
+async function pollCloudTriggers() {
+  if (busy) return;
+  try {
+    const res = await fetch(
+      `${API_BASE}/edge/pending?court_key=${encodeURIComponent(COURT_KEY)}`,
+    );
+    if (!res.ok) {
+      log("pending poll error:", res.status, await res.text());
+      return;
+    }
+    const data = await res.json();
+    if (!data.request?.id) return;
+    log("cloud trigger claimed:", data.request.id);
+    await handleReplay("cloud", data.request.id);
+  } catch (err) {
+    log("poll failed:", err.message ?? err);
+  }
+}
+
+function startCloudPoll() {
+  const ms = Number(process.env.POLL_MS ?? 1500);
+  log(`polling cloud triggers every ${ms}ms`);
+  setInterval(() => {
+    void pollCloudTriggers();
+  }, ms);
 }
 
 function startHttp() {
@@ -225,6 +332,13 @@ function startHttp() {
     }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not_found" }));
+  });
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      log(`porta ${EDGE_PORT} ocupada — API local desligada; cloud poll segue ativo`);
+      return;
+    }
+    throw err;
   });
   server.listen(EDGE_PORT, "127.0.0.1", () => {
     log(`local API http://127.0.0.1:${EDGE_PORT}/local/replay`);
@@ -262,6 +376,7 @@ await ensureDirs();
 startBuffer();
 startHttp();
 startKeyboard();
+startCloudPoll();
 
 // warm-up: espera alguns segmentos antes de aceitar replay “bom”
-log(`warming buffer ~${PRE_ROLL_SEC + 5}s (fonte: testsrc)...`);
+log(`warming buffer ~${PRE_ROLL_SEC + 5}s...`);
