@@ -59,6 +59,7 @@ app.get("/courts/:publicKey/clips", async (c) => {
       ...clip,
       play_url: `/clips/${clip.id}`,
       download_url: `/clips/${clip.id}?download=1`,
+      delete_url: `/clips/${clip.id}`,
     })),
   });
 });
@@ -164,7 +165,37 @@ app.get("/clips/:clipId", async (c) => {
   return new Response(object.body, { headers });
 });
 
-/** Galeria pública (somente leitura). Trigger é local/ESP. */
+/** Apaga clip no R2 + metadados no D1. */
+app.delete("/clips/:clipId", async (c) => {
+  const clipId = c.req.param("clipId");
+
+  const clip = await c.env.DB.prepare(
+    "SELECT id, object_key FROM clips WHERE id = ?",
+  )
+    .bind(clipId)
+    .first<{ id: string; object_key: string }>();
+
+  if (!clip) return c.json({ error: "clip_not_found" }, 404);
+
+  await c.env.CLIPS.delete(clip.object_key);
+
+  // tabela residual de requests (se ainda existir) — evita FK órfã
+  try {
+    await c.env.DB.prepare(
+      "UPDATE replay_requests SET clip_id = NULL WHERE clip_id = ?",
+    )
+      .bind(clipId)
+      .run();
+  } catch {
+    // ignore se a tabela não existir
+  }
+
+  await c.env.DB.prepare("DELETE FROM clips WHERE id = ?").bind(clipId).run();
+
+  return c.json({ ok: true, clip_id: clipId, deleted: true });
+});
+
+/** Galeria pública. Trigger é local/ESP; apagar na própria página. */
 app.get("/c/:publicKey", async (c) => {
   const publicKey = c.req.param("publicKey");
   const court = await c.env.DB.prepare(
@@ -188,10 +219,13 @@ app.get("/c/:publicKey", async (c) => {
   const items = results
     .map(
       (clip) => `
-      <li>
+      <li data-clip-id="${clip.id}">
         <p>${clip.created_at}${clip.bytes != null ? ` · ${(clip.bytes / 1e6).toFixed(1)} MB` : ""}</p>
         <video controls preload="metadata" src="/clips/${clip.id}"></video>
-        <p><a href="/clips/${clip.id}?download=1">download</a></p>
+        <p class="row">
+          <a href="/clips/${clip.id}?download=1">download</a>
+          <button type="button" class="danger" data-delete="${clip.id}">apagar</button>
+        </p>
       </li>`,
     )
     .join("\n");
@@ -209,13 +243,42 @@ app.get("/c/:publicKey", async (c) => {
     li { list-style: none; margin: 0 0 1.5rem; padding: 0; }
     ul { padding: 0; }
     .note { opacity: .75; margin: 0 0 1.25rem; }
+    .row { display: flex; gap: 1rem; align-items: center; }
+    button.danger {
+      font: inherit; border: 0; background: transparent; color: #c33;
+      cursor: pointer; text-decoration: underline; padding: 0;
+    }
+    button.danger:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <h1>${court.name}</h1>
   <p>Galeria · <code>${court.public_key}</code></p>
-  <p class="note">Gravação só no botão físico / edge local — esta página é só para assistir.</p>
-  <ul>${items || "<li>Nenhum clip ainda.</li>"}</ul>
+  <p class="note">Gravação só no botão físico / edge local. Apagar remove o arquivo da nuvem.</p>
+  <ul id="clips">${items || "<li id='empty'>Nenhum clip ainda.</li>"}</ul>
+  <script>
+    document.getElementById('clips')?.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-delete]');
+      if (!btn) return;
+      const id = btn.getAttribute('data-delete');
+      if (!id) return;
+      if (!confirm('Apagar este replay de forma permanente?')) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/clips/' + encodeURIComponent(id), { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'falha ao apagar');
+        btn.closest('li')?.remove();
+        const list = document.getElementById('clips');
+        if (list && !list.querySelector('li')) {
+          list.innerHTML = "<li id='empty'>Nenhum clip ainda.</li>";
+        }
+      } catch (err) {
+        alert(String(err.message || err));
+        btn.disabled = false;
+      }
+    });
+  </script>
 </body>
 </html>`;
 
