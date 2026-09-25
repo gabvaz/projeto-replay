@@ -9,7 +9,8 @@
     "types": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply replay-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply replay-db --remote",
-    "edge": "node edge/agent.mjs"
+    "edge": "node edge/agent.mjs",
+    "edge:ui": "node edge/open-ui.mjs"
   },
   "repository": {
     "type": "git",

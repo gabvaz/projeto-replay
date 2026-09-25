@@ -6,11 +6,13 @@
  *   - senão → testsrc sintético
  *
  * Uso:
- *   npm run edge
+ *   npm run edge          → terminal + teclado
+ *   npm run edge:ui       → sobe e abre UI local (127.0.0.1)
  *   curl -X POST http://127.0.0.1:8788/local/replay
- *   # ou Enter/Espaço/R neste processo
  *
- * Env: API_BASE, COURT_KEY, RTSP_URL, EDGE_PORT, PRE_ROLL_SEC, POST_ROLL_SEC, SEGMENT_SEC
+ * A UI de gravação é SÓ local (não vai pro Worker/Cloudflare).
+ *
+ * Env: API_BASE, COURT_KEY, RTSP_URL, EDGE_PORT, PRE_ROLL_SEC, POST_ROLL_SEC, SEGMENT_SEC, OPEN_UI
  */
 
 import { spawn } from "node:child_process";
@@ -266,12 +268,80 @@ async function handleReplay(source = "api") {
   }
 }
 
+function localRecordPage() {
+  const gallery = `${API_BASE}/c/${COURT_KEY}`;
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Replay · local</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 1.5rem; }
+    main { width: min(24rem, 100%); text-align: center; }
+    button {
+      width: 100%; font: inherit; font-size: 1.35rem; font-weight: 700;
+      padding: 1.1rem 1.25rem; border: 0; border-radius: .75rem;
+      background: #0a7; color: #fff; cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    #status { margin-top: 1rem; min-height: 1.5em; opacity: .85; }
+    #status[data-state="error"] { color: #c33; }
+    #status[data-state="ok"] { color: #0a7; }
+    .meta { margin-top: 1.5rem; font-size: .9rem; opacity: .7; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Gravar replay</h1>
+    <p>Só neste PC · edge local</p>
+    <button type="button" id="btn">Gravar agora</button>
+    <p id="status" role="status"></p>
+    <p class="meta">quadra <code>${COURT_KEY}</code><br />
+      <a href="${gallery}" target="_blank" rel="noopener">abrir galeria</a>
+    </p>
+  </main>
+  <script>
+    const btn = document.getElementById('btn');
+    const statusEl = document.getElementById('status');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      statusEl.dataset.state = '';
+      statusEl.textContent = 'Gravando…';
+      try {
+        const res = await fetch('/local/replay', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || 'falhou');
+        statusEl.dataset.state = 'ok';
+        statusEl.innerHTML = 'Pronto! <a href="' + (data.play || data.gallery) + '" target="_blank" rel="noopener">ver clip</a>';
+      } catch (err) {
+        statusEl.dataset.state = 'error';
+        statusEl.textContent = String(err.message || err);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>`;
+}
+
 function startHttp() {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/ui")) {
+      res.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "cache-control": "no-store",
+      });
+      res.end(localRecordPage());
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, busy, court: COURT_KEY, api: API_BASE }));
+      res.end(JSON.stringify({ ok: true, busy, court: COURT_KEY, api: API_BASE, local_ui: true }));
       return;
     }
     if (req.method === "POST" && url.pathname === "/local/replay") {
@@ -290,8 +360,18 @@ function startHttp() {
     }
     throw err;
   });
+  // 127.0.0.1 = só esta máquina (não expõe na LAN / não vai pra Cloudflare)
   server.listen(EDGE_PORT, "127.0.0.1", () => {
-    log(`local API http://127.0.0.1:${EDGE_PORT}/local/replay`);
+    const ui = `http://127.0.0.1:${EDGE_PORT}/`;
+    log(`UI local ${ui}`);
+    log(`API local ${ui}local/replay`);
+    if (process.env.OPEN_UI === "1") {
+      spawn("cmd", ["/c", "start", "", ui], {
+        detached: true,
+        stdio: "ignore",
+        windowsHide: true,
+      }).unref();
+    }
   });
 }
 
@@ -328,4 +408,4 @@ startHttp();
 startKeyboard();
 
 log(`warming buffer ~${PRE_ROLL_SEC + 5}s...`);
-log("trigger: POST /local/replay | Enter/Espaço/R (sem poll cloud)");
+log("trigger: UI local / POST /local/replay / Enter|Espaço|R");
