@@ -8,6 +8,7 @@ dist/
 .DS_Store
 edge/.buffer/
 edge/.clips/
+edge/.outbox/
 edge/.loadtest-6cam/
 edge/.env
 web/dist/

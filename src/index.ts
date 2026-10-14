@@ -4,7 +4,16 @@ import { admin, payloadIssues } from "./admin";
 import { arena } from "./arena";
 import { adminAuth, arenaAuth, edgeAuth, startArenaSession } from "./auth";
 import { brandOf } from "./queries";
-import { retentionDays, sha256Hex, todayBrt, type Bindings, type Env } from "./lib";
+import { CRON_ALERTS, runAlerts, runDaily } from "./jobs";
+import {
+  pastTime,
+  retentionDays,
+  sha256Hex,
+  sqlTime,
+  todayBrt,
+  type Bindings,
+  type Env,
+} from "./lib";
 
 type ClipRow = {
   id: string;
@@ -24,6 +33,9 @@ type EventType = "view" | "download" | "share";
 
 const MAX_THUMB_BYTES = 1_000_000;
 const HEARTBEAT_HISTORY_MIN = 15;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DEVICE_EVENT_TYPES = new Set(["press", "clip_ok", "clip_fail", "ffmpeg_restart", "boot", "queue_drop"]);
+const MAX_EVENTS_PER_HEARTBEAT = 50;
 
 const app = new Hono<Env>();
 
@@ -227,14 +239,19 @@ app.post("/api/clips/:id/events", async (c) => {
 
 /**
  * Pi pede um slot de upload.
- * Body: { court_key: "demo01", clip_id?: string }
+ * Body: { court_key: "demo01", clip_id?: string, recorded_at?: ISO }
+ * Idempotente por clip_id: a fila do Pi repete o pedido depois de queda de internet.
+ * recorded_at (até 24h atrás) vira o created_at, pra galeria mostrar a hora do lance.
  */
 app.post("/edge/clips/upload-slot", async (c) => {
   const device = c.get("device");
-  type SlotBody = { court_key?: string; clip_id?: string };
+  type SlotBody = { court_key?: string; clip_id?: string; recorded_at?: string };
   const body = await c.req.json<SlotBody>().catch((): SlotBody => ({}));
   const courtKey = body.court_key;
   if (!courtKey) return c.json({ error: "court_key_required" }, 400);
+  if (body.clip_id !== undefined && !UUID_RE.test(String(body.clip_id))) {
+    return c.json({ error: "invalid_clip_id" }, 400);
+  }
 
   const court = await c.env.DB.prepare(
     "SELECT id FROM courts WHERE public_key = ? AND venue_id = ?",
@@ -244,17 +261,24 @@ app.post("/edge/clips/upload-slot", async (c) => {
 
   if (!court) return c.json({ error: "court_not_found" }, 404);
 
-  const clipId = body.clip_id ?? crypto.randomUUID();
+  const clipId = body.clip_id?.toLowerCase() ?? crypto.randomUUID();
   const objectKey = `courts/${court.id}/${clipId}.mp4`;
+  const recordedAt = pastTime(body.recorded_at, 24 * 3600_000) ?? sqlTime(new Date());
 
   await c.env.DB.prepare(
-    `INSERT INTO clips (id, court_id, object_key, status, device_id, expires_at)
-     VALUES (?, ?, ?, 'pending', ?, datetime('now', ?))`,
+    `INSERT OR IGNORE INTO clips (id, court_id, object_key, status, device_id, created_at, expires_at)
+     VALUES (?, ?, ?, 'pending', ?, ?, datetime(?, ?))`,
   )
-    .bind(clipId, court.id, objectKey, device.id, `+${retentionDays(c.env)} days`)
+    .bind(clipId, court.id, objectKey, device.id, recordedAt, recordedAt, `+${retentionDays(c.env)} days`)
     .run();
 
+  const existing = await c.env.DB.prepare("SELECT device_id, status FROM clips WHERE id = ?")
+    .bind(clipId)
+    .first<{ device_id: string | null; status: string }>();
+  if (existing?.device_id !== device.id) return c.json({ error: "clip_id_taken" }, 409);
+
   return c.json({
+    status: existing.status,
     clip_id: clipId,
     upload_url: `/edge/clips/${clipId}/content`,
     thumbnail_url: `/edge/clips/${clipId}/thumbnail`,
@@ -270,7 +294,7 @@ app.put("/edge/clips/:clipId/content", async (c) => {
   const contentType = c.req.header("content-type") ?? "video/mp4";
 
   const clip = await c.env.DB.prepare(
-    "SELECT id, court_id, object_key, status FROM clips WHERE id = ? AND device_id = ?",
+    "SELECT id, court_id, object_key, status, created_at FROM clips WHERE id = ? AND device_id = ?",
   )
     .bind(clipId, device.id)
     .first<ClipRow>();
@@ -294,8 +318,9 @@ app.put("/edge/clips/:clipId/content", async (c) => {
        WHERE id = ?`,
     ).bind(contentType, bytes, clipId),
     c.env.DB.prepare(
-      "INSERT INTO clip_events (clip_id, court_id, venue_id, type) VALUES (?, ?, ?, 'created')",
-    ).bind(clipId, clip.court_id, device.venue_id),
+      `INSERT INTO clip_events (clip_id, court_id, venue_id, type, created_at)
+       VALUES (?, ?, ?, 'created', ?)`,
+    ).bind(clipId, clip.court_id, device.venue_id, clip.created_at),
   ]);
 
   return c.json({
@@ -341,7 +366,18 @@ app.post("/edge/heartbeat", async (c) => {
     .json<Record<string, unknown>>()
     .catch((): Record<string, unknown> => ({}));
   const agentVersion = typeof payload.agent_version === "string" ? payload.agent_version : null;
-  const json = JSON.stringify(payload).slice(0, 4000);
+  // Eventos vão pra device_events; o resto é o "último estado" do device.
+  const { events: rawEvents, ...state } = payload;
+  const events = (Array.isArray(rawEvents) ? rawEvents : [])
+    .slice(0, MAX_EVENTS_PER_HEARTBEAT)
+    .flatMap((e: unknown) => {
+      const ev = e as Record<string, unknown> | null;
+      const at = pastTime(ev?.at, 30 * 86400_000);
+      if (!ev || !DEVICE_EVENT_TYPES.has(String(ev.type)) || !at) return [];
+      const detail = typeof ev.detail === "string" ? ev.detail.slice(0, 200) : null;
+      return [{ type: String(ev.type), detail, at }];
+    });
+  const json = JSON.stringify(state).slice(0, 4000);
 
   const prev = await c.env.DB.prepare(
     `SELECT d.agent_version,
@@ -355,7 +391,7 @@ app.post("/edge/heartbeat", async (c) => {
     !prev?.last_history ||
     Date.parse(`${prev.last_history.replace(" ", "T")}Z`) <= Date.now() - HEARTBEAT_HISTORY_MIN * 60_000;
   const anomaly =
-    payloadIssues(payload).length > 0 || (agentVersion !== null && agentVersion !== prev?.agent_version);
+    payloadIssues(state).length > 0 || (agentVersion !== null && agentVersion !== prev?.agent_version);
 
   const stmts = [
     c.env.DB.prepare(
@@ -369,12 +405,20 @@ app.post("/edge/heartbeat", async (c) => {
       c.env.DB.prepare("INSERT INTO heartbeats (device_id, payload) VALUES (?, ?)").bind(device.id, json),
     );
   }
+  for (const ev of events) {
+    stmts.push(
+      c.env.DB.prepare(
+        "INSERT INTO device_events (device_id, type, detail, created_at) VALUES (?, ?, ?, ?)",
+      ).bind(device.id, ev.type, ev.detail, ev.at),
+    );
+  }
   await c.env.DB.batch(stmts);
 
   return c.json({
     ok: true,
     device_id: device.id,
     history: historyDue || anomaly,
+    events: events.length,
     server_time: new Date().toISOString(),
   });
 });
@@ -529,37 +573,14 @@ app.get("/courts/:publicKey/clips", async (c) => {
   });
 });
 
-/** Retenção: apaga clips expirados (R2 + D1), pendentes órfãos e heartbeats antigos. */
-async function purgeExpired(env: Bindings): Promise<{ clips: number }> {
-  let total = 0;
-  for (;;) {
-    const { results } = await env.DB.prepare(
-      `SELECT id, object_key, thumb_key FROM clips
-       WHERE expires_at <= datetime('now')
-          OR (status = 'pending' AND created_at <= datetime('now', '-1 day'))
-       LIMIT 100`,
-    ).all<{ id: string; object_key: string; thumb_key: string | null }>();
-    if (!results.length) break;
-
-    const keys = results.flatMap((r) => (r.thumb_key ? [r.object_key, r.thumb_key] : [r.object_key]));
-    await env.CLIPS.delete(keys);
-    const placeholders = results.map(() => "?").join(",");
-    await env.DB.prepare(`DELETE FROM clips WHERE id IN (${placeholders})`)
-      .bind(...results.map((r) => r.id))
-      .run();
-    total += results.length;
-    if (results.length < 100) break;
-  }
-
-  await env.DB.prepare("DELETE FROM heartbeats WHERE created_at <= datetime('now', '-7 days')").run();
-  return { clips: total };
-}
-
 export default {
   fetch: app.fetch,
-  async scheduled(_controller, env, ctx) {
+  async scheduled(controller, env, ctx) {
+    const job = controller.cron === CRON_ALERTS ? "alerts" : "daily";
     ctx.waitUntil(
-      purgeExpired(env).then((r) => console.log(JSON.stringify({ event: "purge", ...r }))),
+      (job === "alerts" ? runAlerts(env) : runDaily(env)).then((r) =>
+        console.log(JSON.stringify({ event: job, ...r })),
+      ),
     );
   },
 } satisfies ExportedHandler<Bindings>;

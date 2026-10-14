@@ -1,0 +1,8 @@
+# ESP32 do botão → /dev/replay-button (nome fixo, independe de ttyUSB0/ttyACM0).
+# CP210x (DevKit clássico)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="replay-button", GROUP="dialout", MODE="0660"
+# CH340 / CH9102
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="replay-button", GROUP="dialout", MODE="0660"
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d4", SYMLINK+="replay-button", GROUP="dialout", MODE="0660"
+# ESP32-S3/C3 USB nativo
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="replay-button", GROUP="dialout", MODE="0660"
