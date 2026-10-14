@@ -1,7 +1,10 @@
+import type { Brand } from "./shared/brand";
+
 export type Court = {
   key: string;
   name: string;
   venue_name: string;
+  brand?: Brand;
   retention_days: number;
   today: string;
 };
@@ -26,6 +29,7 @@ export type ClipDetail = {
   court_key: string;
   court_name: string;
   venue_name: string;
+  brand?: Brand;
   thumb_url: string | null;
   play_url: string;
   download_url: string;

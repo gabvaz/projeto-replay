@@ -19,7 +19,7 @@ import {
   type VenueDetail,
   type VenueRow,
 } from "./api";
-import { Badge, Button, Empty, ErrorNote, Field, inputCls, Loading, Modal, Table } from "./ui";
+import { Badge, Button, Empty, ErrorNote, Field, inputCls, Loading, Modal, Table } from "../shared/ui";
 
 const STATUS_TONE: Record<EquipmentStatus, "lime" | "zinc" | "amber" | "red"> = {
   installed: "lime",

@@ -1,9 +1,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ExternalLink, Mail, MapPin, Pencil, Phone, Plus, QrCode, Trash2, User } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  Copy,
+  ExternalLink,
+  KeyRound,
+  Mail,
+  MapPin,
+  MessageCircle,
+  Pencil,
+  Phone,
+  Plus,
+  QrCode,
+  Trash2,
+  User,
+} from "lucide-react";
 import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   adminFetch,
+  ago,
   brl,
   dateBr,
   errorText,
@@ -15,11 +31,11 @@ import {
   type CourtRow,
   type VenueDetail,
 } from "../api";
-import { DailyChart } from "../charts";
+import { DailyChart } from "../../shared/charts";
 import { CreateDeviceModal, DeviceTable } from "../devices";
 import { EquipmentModal, EquipmentTable, equipmentTotal } from "../equipment";
 import { ContractModal, InvoiceTable } from "../invoices";
-import { Badge, Button, buttonCls, Card, Empty, ErrorNote, Field, inputCls, Kpi, Loading, Modal, PageHeader, Tabs } from "../ui";
+import { Badge, Button, buttonCls, Card, Empty, ErrorNote, Field, inputCls, Kpi, Loading, Modal, PageHeader, Tabs } from "../../shared/ui";
 import { VenueFormModal } from "./VenueForm";
 import { STATUS_TONE } from "./VenuesPage";
 
@@ -135,7 +151,113 @@ function SummaryTab({ d }: { d: VenueDetail }) {
           <p className="mt-4 text-xs text-zinc-600">Cliente desde {dateBr(v.created_at.slice(0, 10))}</p>
         </Card>
       </div>
+      <AccessCard venueId={v.id} venueName={v.name} phone={v.contact_phone} access={d.access} />
     </>
+  );
+}
+
+/** Link do portal da arena: o token só existe na resposta do POST, então aparece uma vez. */
+function AccessCard({
+  venueId,
+  venueName,
+  phone,
+  access,
+}: {
+  venueId: string;
+  venueName: string;
+  phone: string | null;
+  access: VenueDetail["access"];
+}) {
+  const qc = useQueryClient();
+  const [url, setUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const create = useMutation({
+    mutationFn: () => adminFetch<{ url: string }>(`/venues/${venueId}/access-link`, "POST"),
+    onSuccess: (r) => {
+      setUrl(r.url);
+      setCopied(false);
+      void qc.invalidateQueries({ queryKey: ["venue", venueId] });
+    },
+  });
+  const revoke = useMutation({
+    mutationFn: () => adminFetch(`/venues/${venueId}/access-link`, "DELETE"),
+    onSuccess: () => {
+      setUrl(null);
+      void qc.invalidateQueries({ queryKey: ["venue", venueId] });
+    },
+  });
+  const message = url
+    ? `Oi! Esse é o acesso ao portal da ${venueName} no Replay (estatísticas, clips, cartazes QR e faturas): ${url}`
+    : "";
+  const waNumber = phone?.replace(/\D/g, "");
+
+  return (
+    <Card
+      title={
+        <span className="inline-flex items-center gap-2">
+          <KeyRound className="size-4 text-lime" /> Acesso da arena
+        </span>
+      }
+      className="mt-4"
+    >
+      {url ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-amber-200">Esse link não aparece de novo. Manda agora pro responsável.</p>
+          <div className="flex items-center gap-2 rounded-lg border border-line bg-ink p-2">
+            <code className="min-w-0 flex-1 truncate font-mono text-xs text-lime">{url}</code>
+            <Button
+              size="sm"
+              onClick={() => {
+                void navigator.clipboard.writeText(url);
+                setCopied(true);
+              }}
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {copied ? "Copiado" : "Copiar"}
+            </Button>
+          </div>
+          <a
+            href={`https://wa.me/${waNumber ? `55${waNumber}` : ""}?text=${encodeURIComponent(message)}`}
+            target="_blank"
+            rel="noreferrer"
+            className={`${buttonCls("primary", "sm")} self-start`}
+          >
+            <MessageCircle className="size-3.5" /> Enviar no WhatsApp
+          </a>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-zinc-400">
+            {access
+              ? `Link ativo desde ${dateBr(access.created_at.slice(0, 10))} · último acesso ${ago(access.last_used_at)}`
+              : "Nenhum link ativo. A arena ainda não acessa o portal."}
+          </p>
+          <span className="flex gap-2">
+            <Button
+              size="sm"
+              variant="primary"
+              loading={create.isPending}
+              onClick={() =>
+                (!access || confirm("Gerar um link novo derruba o atual (quem estiver logado sai). Continuar?")) &&
+                create.mutate()
+              }
+            >
+              {access ? "Gerar novo link" : "Gerar link"}
+            </Button>
+            {access && (
+              <Button
+                size="sm"
+                variant="danger"
+                loading={revoke.isPending}
+                onClick={() => confirm("Revogar o acesso da arena agora?") && revoke.mutate()}
+              >
+                Revogar
+              </Button>
+            )}
+          </span>
+        </div>
+      )}
+    </Card>
   );
 }
 

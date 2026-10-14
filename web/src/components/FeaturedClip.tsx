@@ -34,7 +34,7 @@ export function FeaturedClip({ clip }: { clip: ClipSummary }) {
           </p>
           <p className="mt-2 text-sm text-zinc-400">Seu lance tá pronto. Assista, baixe e mande pra galera.</p>
         </div>
-        <span className="inline-flex items-center justify-center gap-2 self-start rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink shadow-[0_10px_30px_-10px_rgb(215_255_58/0.7)] transition group-hover:brightness-110">
+        <span className="inline-flex items-center justify-center gap-2 self-start rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink shadow-[0_10px_30px_-10px_color-mix(in_oklab,var(--color-lime)_70%,transparent)] transition group-hover:brightness-110">
           <Play className="size-4 fill-current" />
           Assistir
         </span>

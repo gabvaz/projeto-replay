@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { LogoIcon } from "../../components/Logo";
 import { adminFetch, ApiError } from "../api";
-import { Button, ErrorNote, inputCls } from "../ui";
+import { Button, ErrorNote, inputCls } from "../../shared/ui";
 
 export function LoginPage() {
   const navigate = useNavigate();

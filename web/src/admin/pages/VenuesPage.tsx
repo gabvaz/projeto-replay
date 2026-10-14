@@ -3,7 +3,7 @@ import { ChevronRight, MapPin, Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { brl, get, num, VENUE_STATUS_LABEL, type VenueRow, type VenueStatus } from "../api";
-import { Badge, Button, Card, Empty, inputCls, Loading, PageHeader, StatusDot } from "../ui";
+import { Badge, Button, Card, Empty, inputCls, Loading, PageHeader, StatusDot } from "../../shared/ui";
 import { VenueFormModal } from "./VenueForm";
 
 export const STATUS_TONE: Record<VenueStatus, "lime" | "blue" | "amber" | "zinc"> = {

@@ -14,6 +14,7 @@ import "./index.css";
 
 const QrPage = lazy(() => import("./pages/QrPage").then((m) => ({ default: m.QrPage })));
 const AdminApp = lazy(() => import("./admin/AdminApp"));
+const ArenaApp = lazy(() => import("./arena/ArenaApp"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,14 @@ const router = createBrowserRouter([
     element: (
       <Suspense fallback={<div className="min-h-svh bg-ink" />}>
         <AdminApp />
+      </Suspense>
+    ),
+  },
+  {
+    path: "/arena/*",
+    element: (
+      <Suspense fallback={<div className="min-h-svh bg-ink" />}>
+        <ArenaApp />
       </Suspense>
     ),
   },

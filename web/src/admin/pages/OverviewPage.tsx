@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Flame, WifiOff, Wallet } from "lucide-react";
 import { Link } from "react-router";
 import { ago, brl, dateBr, get, num, periodLabel, type Alert, type Overview } from "../api";
-import { DailyChart } from "../charts";
-import { Card, Empty, Kpi, Loading, PageHeader, Table } from "../ui";
+import { DailyChart } from "../../shared/charts";
+import { Card, Empty, Kpi, Loading, PageHeader, Table } from "../../shared/ui";
 
 function AlertItem({ alert }: { alert: Alert }) {
   const base = "flex items-start gap-3 px-4 py-3";

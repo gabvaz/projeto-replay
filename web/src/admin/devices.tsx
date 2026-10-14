@@ -3,7 +3,7 @@ import { Check, Copy, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router";
 import { adminFetch, ago, errorText, type DeviceRow } from "./api";
-import { Badge, Button, Empty, ErrorNote, Field, inputCls, Modal, StatusDot, Table } from "./ui";
+import { Badge, Button, Empty, ErrorNote, Field, inputCls, Modal, StatusDot, Table } from "../shared/ui";
 
 function uptime(s?: number): string {
   if (!s) return "—";

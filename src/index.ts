@@ -1,7 +1,9 @@
 import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { admin, payloadIssues } from "./admin";
-import { adminAuth, edgeAuth } from "./auth";
+import { arena } from "./arena";
+import { adminAuth, arenaAuth, edgeAuth, startArenaSession } from "./auth";
+import { brandOf } from "./queries";
 import { retentionDays, sha256Hex, todayBrt, type Bindings, type Env } from "./lib";
 
 type ClipRow = {
@@ -47,6 +49,45 @@ async function recordEvent(
 app.use("/edge/*", edgeAuth);
 app.use("/admin/*", adminAuth);
 app.route("/admin", admin);
+app.use("/portal/*", arenaAuth);
+app.route("/portal", arena);
+
+/** Link do portal enviado pelo admin: vira cookie e some da barra de endereço. */
+app.get("/a/:token", async (c) => {
+  const link = await c.env.DB.prepare(
+    "SELECT id FROM venue_access_links WHERE token_hash = ? AND revoked_at IS NULL",
+  )
+    .bind(await sha256Hex(c.req.param("token")))
+    .first<{ id: string }>();
+  c.header("referrer-policy", "no-referrer");
+  c.header("cache-control", "no-store");
+  if (!link || !c.env.SESSION_SECRET) return c.redirect("/arena/entrar?erro=link", 302);
+
+  await c.env.DB.prepare("UPDATE venue_access_links SET last_used_at = datetime('now') WHERE id = ?")
+    .bind(link.id)
+    .run();
+  await startArenaSession(c, link.id);
+  return c.redirect("/arena", 302);
+});
+
+app.get("/brand/:venueId/logo", async (c) => {
+  const venue = await c.env.DB.prepare("SELECT logo_key FROM venues WHERE id = ?")
+    .bind(c.req.param("venueId"))
+    .first<{ logo_key: string | null }>();
+  if (!venue?.logo_key) return c.json({ error: "logo_not_found" }, 404);
+  const object = await c.env.CLIPS.get(venue.logo_key);
+  if (!object) return c.json({ error: "logo_not_found" }, 404);
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("x-content-type-options", "nosniff");
+  headers.set(
+    "cache-control",
+    c.req.query("v") ? "public, max-age=31536000, immutable" : "public, max-age=3600",
+  );
+  return new Response(object.body, { headers });
+});
 
 app.get("/api/health", (c) =>
   c.json({
@@ -59,15 +100,38 @@ app.get("/api/health", (c) =>
 
 app.get("/api/courts/:key", async (c) => {
   const court = await c.env.DB.prepare(
-    `SELECT co.public_key AS key, co.name, v.name AS venue_name
+    `SELECT co.public_key AS key, co.name, v.id AS venue_id, v.name AS venue_name,
+            v.public_name, v.brand_color, v.logo_key
      FROM courts co JOIN venues v ON v.id = co.venue_id
      WHERE co.public_key = ?`,
   )
     .bind(c.req.param("key"))
-    .first<{ key: string; name: string; venue_name: string }>();
+    .first<{
+      key: string;
+      name: string;
+      venue_id: string;
+      venue_name: string;
+      public_name: string | null;
+      brand_color: string | null;
+      logo_key: string | null;
+    }>();
 
   if (!court) return c.json({ error: "court_not_found" }, 404);
-  return c.json({ ...court, retention_days: retentionDays(c.env), today: todayBrt() });
+  const brand = brandOf({
+    id: court.venue_id,
+    name: court.venue_name,
+    public_name: court.public_name,
+    brand_color: court.brand_color,
+    logo_key: court.logo_key,
+  });
+  return c.json({
+    key: court.key,
+    name: court.name,
+    venue_name: brand.name,
+    brand,
+    retention_days: retentionDays(c.env),
+    today: todayBrt(),
+  });
 });
 
 /** Clips ready de um dia no fuso de Brasília. */
@@ -118,7 +182,8 @@ app.get("/api/clips/:id", async (c) => {
     `SELECT cl.id, cl.bytes, cl.expires_at, cl.thumb_key,
             strftime('%Y-%m-%d', cl.created_at, '-3 hours') AS date_local,
             strftime('%H:%M', cl.created_at, '-3 hours') AS time_local,
-            co.public_key AS court_key, co.name AS court_name, v.name AS venue_name
+            co.public_key AS court_key, co.name AS court_name, v.name AS venue_name,
+            v.id AS venue_id, v.public_name, v.brand_color, v.logo_key
      FROM clips cl
      JOIN courts co ON co.id = cl.court_id
      JOIN venues v ON v.id = co.venue_id
@@ -128,9 +193,12 @@ app.get("/api/clips/:id", async (c) => {
     .first<{ id: string; thumb_key: string | null } & Record<string, unknown>>();
 
   if (!clip) return c.json({ error: "clip_not_found" }, 404);
-  const { thumb_key, ...rest } = clip;
+  const { thumb_key, venue_id, public_name, brand_color, logo_key, ...rest } = clip;
+  const brand = brandOf({ id: venue_id, name: rest.venue_name, public_name, brand_color, logo_key });
   return c.json({
     ...rest,
+    venue_name: brand.name,
+    brand,
     thumb_url: thumb_key ? `/clips/${clip.id}/thumb.jpg` : null,
     play_url: `/clips/${clip.id}`,
     download_url: `/clips/${clip.id}?download=1`,
@@ -382,7 +450,7 @@ app.get("/clips/:clipId", async (c) => {
 app.get("/v/:id", async (c) => {
   const indexRes = await c.env.ASSETS.fetch(new URL("/", c.req.url));
   const clip = await c.env.DB.prepare(
-    `SELECT cl.id, cl.thumb_key, co.name AS court_name, v.name AS venue_name,
+    `SELECT cl.id, cl.thumb_key, co.name AS court_name, COALESCE(v.public_name, v.name) AS venue_name,
             strftime('%d/%m %H:%M', cl.created_at, '-3 hours') AS when_local
      FROM clips cl
      JOIN courts co ON co.id = cl.court_id

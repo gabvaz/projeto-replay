@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { get, type DeviceRow } from "../api";
 import { DeviceTable } from "../devices";
-import { Card, Kpi, Loading, PageHeader, Tabs } from "../ui";
+import { Card, Kpi, Loading, PageHeader, Tabs } from "../../shared/ui";
 
 type Filter = "all" | "offline" | "issues" | "revoked";
 

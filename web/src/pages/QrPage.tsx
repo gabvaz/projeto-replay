@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { fetchCourt } from "../api";
 import { Logo } from "../components/Logo";
+import { brandStyle } from "../shared/brand";
 
 const STEPS = [
   { icon: Hand, title: "Aperte o botão", text: "Salva os últimos 20s" },
@@ -28,8 +29,13 @@ export function QrPage() {
     }).then(setSvg);
   }, [url]);
 
+  const brand = court.data?.brand;
+
   return (
-    <div className="flex min-h-svh flex-col items-center gap-6 px-4 py-8 print:block print:p-0">
+    <div
+      style={brandStyle(brand?.color)}
+      className="flex min-h-svh flex-col items-center gap-6 px-4 py-8 print:block print:p-0"
+    >
       <button
         type="button"
         onClick={() => window.print()}
@@ -42,8 +48,11 @@ export function QrPage() {
       <article className="flex aspect-[210/297] w-full max-w-[210mm] flex-col overflow-hidden bg-white text-ink shadow-2xl print:h-[297mm] print:w-[210mm] print:max-w-none print:shadow-none">
         <header className="flex items-center justify-between bg-ink px-[7%] py-[4%] text-white">
           <Logo className="scale-125 origin-left" />
-          <span className="text-[clamp(10px,1.6vw,14px)] font-semibold tracking-[0.2em] text-zinc-400 uppercase">
+          <span className="flex items-center gap-3 text-[clamp(10px,1.6vw,14px)] font-semibold tracking-[0.2em] text-zinc-400 uppercase">
             {court.data?.venue_name}
+            {brand?.logo_url && (
+              <img src={brand.logo_url} alt="" className="size-[clamp(36px,7vw,64px)] rounded-lg object-contain" />
+            )}
           </span>
         </header>
 

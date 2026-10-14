@@ -3,9 +3,11 @@ export type Bindings = {
   CLIPS: R2Bucket;
   ASSETS: Fetcher;
   ADMIN_TOKEN: string;
+  SESSION_SECRET: string;
   IP_HASH_SALT?: string;
   RETENTION_DAYS?: string;
   DEVICE_OFFLINE_SEC?: string;
+  SUPPORT_WHATSAPP?: string;
 };
 
 export type Device = {
@@ -14,7 +16,10 @@ export type Device = {
   name: string;
 };
 
-export type Env = { Bindings: Bindings; Variables: { device: Device; sessionExp: number } };
+export type Env = {
+  Bindings: Bindings;
+  Variables: { device: Device; sessionExp: number; venueId: string };
+};
 
 /** Brasil sem horário de verão desde 2019: UTC-3 fixo. */
 export const BRT_OFFSET_MS = 3 * 60 * 60 * 1000;

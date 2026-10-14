@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { adminFetch, errorText, VENUE_STATUS_LABEL, type VenueStatus } from "../api";
-import { Button, ErrorNote, Field, inputCls, Modal } from "../ui";
+import { Button, ErrorNote, Field, inputCls, Modal } from "../../shared/ui";
 
 export type VenueFields = {
   name: string;

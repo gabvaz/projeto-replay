@@ -1,46 +1,37 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { checkAdminToken, endSession, startSession } from "./auth";
 import {
-  brtDayStartUtc,
-  deviceOfflineSec,
-  randomHex,
-  sha256Hex,
-  todayBrt,
-  type Bindings,
-  type Env,
-} from "./lib";
+  activeContractStmt,
+  audit,
+  byType,
+  cents,
+  clipsForDay,
+  courtsStmt,
+  deleteClip,
+  devicesStmt,
+  ensureInvoices,
+  invoicesStmt,
+  isDate,
+  oneOf,
+  offlineWindow,
+  readBody,
+  seriesStartUtc,
+  seriesStmt,
+  text,
+  totalsStmt,
+  withDeviceStatus,
+  withInvoiceStatus,
+  type Row,
+} from "./queries";
+import { brtDayStartUtc, randomHex, sha256Hex, todayBrt, type Env } from "./lib";
+
+export { ensureInvoices, payloadIssues } from "./queries";
 
 export const admin = new Hono<Env>();
-
-type Row = Record<string, unknown>;
 
 const VENUE_STATUS = ["onboarding", "active", "paused", "churned"] as const;
 const EQUIPMENT_KINDS = ["camera", "pi", "switch", "esp32", "button", "adapter", "other"] as const;
 const EQUIPMENT_STATUS = ["stock", "installed", "maintenance", "lost", "retired"] as const;
-const HOT_TEMP_C = 75;
-
-async function readBody<T>(c: Context<Env>): Promise<Partial<T>> {
-  return c.req.json<Partial<T>>().catch((): Partial<T> => ({}));
-}
-
-function text(v: unknown, max = 200): string | null {
-  if (typeof v !== "string") return null;
-  const s = v.trim().slice(0, max);
-  return s || null;
-}
-
-function cents(v: unknown): number | null {
-  const n = Number(v);
-  return Number.isInteger(n) && n >= 0 ? n : null;
-}
-
-function isDate(v: unknown): v is string {
-  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
-function oneOf<T extends string>(list: readonly T[], v: unknown): T | null {
-  return list.includes(v as T) ? (v as T) : null;
-}
 
 function slug(s: string): string {
   return s
@@ -49,123 +40,6 @@ function slug(s: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "")
     .slice(0, 14);
-}
-
-function offlineWindow(env: Bindings): string {
-  return `-${deviceOfflineSec(env)} seconds`;
-}
-
-function addMonth(period: string): string {
-  const [y, m] = period.split("-").map(Number);
-  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-}
-
-function parsePayload(raw: unknown): Row | null {
-  if (typeof raw !== "string") return null;
-  try {
-    return JSON.parse(raw) as Row;
-  } catch {
-    return null;
-  }
-}
-
-/** Anomalias do heartbeat que viram alerta no painel (e forçam histórico no D1). */
-export function payloadIssues(p: Row | null): string[] {
-  if (!p) return [];
-  const issues: string[] = [];
-  if (typeof p.temp_c === "number" && p.temp_c >= HOT_TEMP_C) issues.push(`temp ${p.temp_c.toFixed(0)}°C`);
-  if (typeof p.throttled === "string" && !/^0x0$|^0$/.test(p.throttled)) {
-    issues.push(`throttled ${p.throttled}`);
-  }
-  if (p.buffer_alive === false) issues.push("buffer parado");
-  return issues;
-}
-
-function withDeviceStatus(d: Row): Row {
-  const payload = parsePayload(d.last_payload);
-  return { ...d, online: Boolean(d.online), last_payload: payload, issues: payloadIssues(payload) };
-}
-
-function withInvoiceStatus(i: Row): Row {
-  const overdue = i.status === "open" && String(i.due_date) < todayBrt();
-  return { ...i, overdue };
-}
-
-/**
- * Gera faturas de contratos ativos até o mês corrente (BRT). Idempotente:
- * só tenta meses depois do último já gerado e pula meses que a arena já tem fatura
- * (ex.: paga no contrato anterior); UNIQUE(venue_id, period) segura corrida.
- * Retorna o venue_id de cada fatura nova.
- */
-export async function ensureInvoices(db: D1Database): Promise<string[]> {
-  const current = todayBrt().slice(0, 7);
-  const { results } = await db
-    .prepare(
-      `SELECT c.id, c.venue_id, c.monthly_cents, c.due_day, c.start_date, c.end_date,
-              (SELECT MAX(period) FROM invoices i WHERE i.contract_id = c.id) AS last_period
-       FROM contracts c
-       WHERE c.end_date IS NULL OR c.end_date >= c.start_date
-       ORDER BY c.start_date DESC`,
-    )
-    .all<{
-      id: string;
-      venue_id: string;
-      monthly_cents: number;
-      due_day: number;
-      start_date: string;
-      end_date: string | null;
-      last_period: string | null;
-    }>();
-
-  const pending = results
-    .map((c) => ({
-      ...c,
-      first: c.last_period ? addMonth(c.last_period) : c.start_date.slice(0, 7),
-      last: c.end_date && c.end_date.slice(0, 7) < current ? c.end_date.slice(0, 7) : current,
-    }))
-    .filter((c) => c.first <= c.last);
-  if (!pending.length) return [];
-
-  const venueIds = [...new Set(pending.map((c) => c.venue_id))].slice(0, 90);
-  const minPeriod = pending.reduce((m, c) => (c.first < m ? c.first : m), current);
-  const existing = await db
-    .prepare(
-      `SELECT venue_id, period FROM invoices
-       WHERE period >= ? AND venue_id IN (${venueIds.map(() => "?").join(",")})`,
-    )
-    .bind(minPeriod, ...venueIds)
-    .all<{ venue_id: string; period: string }>();
-  const taken = new Set(existing.results.map((r) => `${r.venue_id}|${r.period}`));
-
-  const stmts: D1PreparedStatement[] = [];
-  const generated: string[] = [];
-  for (const c of pending) {
-    if (!venueIds.includes(c.venue_id)) continue;
-    let period = c.first;
-    for (let guard = 0; period <= c.last && guard < 120; guard++, period = addMonth(period)) {
-      const key = `${c.venue_id}|${period}`;
-      if (taken.has(key)) continue;
-      taken.add(key);
-      generated.push(c.venue_id);
-      stmts.push(
-        db
-          .prepare(
-            `INSERT OR IGNORE INTO invoices (id, venue_id, contract_id, period, amount_cents, due_date)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-          )
-          .bind(
-            `inv_${randomHex(8)}`,
-            c.venue_id,
-            c.id,
-            period,
-            c.monthly_cents,
-            `${period}-${String(c.due_day).padStart(2, "0")}`,
-          ),
-      );
-    }
-  }
-  if (stmts.length) await db.batch(stmts);
-  return generated;
 }
 
 /* ---------------------------------------------------------------- sessão */
@@ -196,9 +70,7 @@ admin.get("/overview", async (c) => {
   const db = c.env.DB;
   const today = todayBrt();
   const todayStart = brtDayStartUtc(today);
-  const seriesStart = brtDayStartUtc(
-    new Date(Date.parse(`${today}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10),
-  );
+  const seriesStart = seriesStartUtc(30);
   const offline = offlineWindow(c.env);
 
   const [venues, devices, events30, eventsToday, created7, uniques, series, mrr, invoices, alertsDev, overdueList, top] =
@@ -281,8 +153,6 @@ admin.get("/overview", async (c) => {
       ),
     ]);
 
-  const byType = (rows: Row[]) =>
-    Object.fromEntries(rows.map((r) => [String(r.type), Number(r.n)])) as Record<string, number>;
   const ev30 = byType(events30.results as Row[]);
   const evToday = byType(eventsToday.results as Row[]);
   const dev = (devices.results[0] ?? {}) as Row;
@@ -412,32 +282,13 @@ admin.get("/venues/:id", async (c) => {
   await ensureInvoices(c.env.DB);
   const db = c.env.DB;
   const id = c.req.param("id");
-  const today = todayBrt();
-  const seriesStart = brtDayStartUtc(
-    new Date(Date.parse(`${today}T00:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10),
-  );
 
   const venue = await db.prepare("SELECT * FROM venues WHERE id = ?").bind(id).first();
   if (!venue) return c.json({ error: "venue_not_found" }, 404);
 
-  const [courts, devices, equipment, contract, invoices, totals, series] = await db.batch([
-    db
-      .prepare(
-        `SELECT co.id, co.name, co.public_key, co.created_at,
-           (SELECT COUNT(*) FROM clip_events e WHERE e.court_id = co.id AND e.type = 'created'
-              AND e.created_at >= datetime('now', '-7 days')) AS clips_7d,
-           (SELECT COUNT(*) FROM clips cl WHERE cl.court_id = co.id AND cl.status = 'ready'
-              AND cl.expires_at > datetime('now')) AS clips_live
-         FROM courts co WHERE co.venue_id = ? ORDER BY co.name`,
-      )
-      .bind(id),
-    db
-      .prepare(
-        `SELECT id, kind, name, agent_version, last_seen_at, last_payload, revoked_at, created_at,
-                CASE WHEN last_seen_at > datetime('now', ?) THEN 1 ELSE 0 END AS online
-         FROM devices WHERE venue_id = ? ORDER BY revoked_at IS NOT NULL, name`,
-      )
-      .bind(offlineWindow(c.env), id),
+  const [courts, devices, equipment, contract, invoices, totals, series, access] = await db.batch([
+    courtsStmt(db, id),
+    devicesStmt(db, c.env, id),
     db
       .prepare(
         `SELECT eq.*, co.name AS court_name FROM equipment eq
@@ -445,29 +296,16 @@ admin.get("/venues/:id", async (c) => {
          WHERE eq.venue_id = ? ORDER BY eq.kind, eq.model`,
       )
       .bind(id),
+    activeContractStmt(db, id),
+    invoicesStmt(db, id),
+    totalsStmt(db, id),
+    seriesStmt(db, id),
     db
       .prepare(
-        `SELECT * FROM contracts WHERE venue_id = ? AND (end_date IS NULL OR end_date >= ?)
-         ORDER BY start_date DESC LIMIT 1`,
-      )
-      .bind(id, today),
-    db
-      .prepare("SELECT * FROM invoices WHERE venue_id = ? ORDER BY period DESC LIMIT 24")
-      .bind(id),
-    db
-      .prepare(
-        `SELECT type, COUNT(*) AS n FROM clip_events
-         WHERE venue_id = ? AND created_at >= datetime('now', '-30 days') GROUP BY type`,
+        `SELECT created_at, last_used_at FROM venue_access_links
+         WHERE venue_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1`,
       )
       .bind(id),
-    db
-      .prepare(
-        `SELECT date(created_at, '-3 hours') AS day,
-                SUM(type = 'created') AS clips, SUM(type = 'view') AS views,
-                SUM(type = 'download') AS downloads, SUM(type = 'share') AS shares
-         FROM clip_events WHERE venue_id = ? AND created_at >= ? GROUP BY day ORDER BY day`,
-      )
-      .bind(id, seriesStart),
   ]);
 
   return c.json({
@@ -477,9 +315,46 @@ admin.get("/venues/:id", async (c) => {
     equipment: equipment.results,
     contract: contract.results[0] ?? null,
     invoices: (invoices.results as Row[]).map(withInvoiceStatus),
-    totals30: Object.fromEntries((totals.results as Row[]).map((r) => [String(r.type), Number(r.n)])),
+    totals30: byType(totals.results as Row[]),
     series: series.results,
+    access: access.results[0] ?? null,
   });
+});
+
+/* --------------------------------------------------- acesso da arena */
+
+/** Gera link do portal (revoga o anterior). O token só aparece nesta resposta. */
+admin.post("/venues/:id/access-link", async (c) => {
+  const venueId = c.req.param("id");
+  const venue = await c.env.DB.prepare("SELECT 1 FROM venues WHERE id = ?").bind(venueId).first();
+  if (!venue) return c.json({ error: "venue_not_found" }, 404);
+
+  const id = `al_${randomHex(6)}`;
+  const token = randomHex(24);
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      "UPDATE venue_access_links SET revoked_at = datetime('now') WHERE venue_id = ? AND revoked_at IS NULL",
+    ).bind(venueId),
+    c.env.DB.prepare("INSERT INTO venue_access_links (id, venue_id, token_hash) VALUES (?, ?, ?)").bind(
+      id,
+      venueId,
+      await sha256Hex(token),
+    ),
+    audit(c.env.DB, "admin", "access_link.create", id, venueId),
+  ]);
+  return c.json({ id, url: `${new URL(c.req.url).origin}/a/${token}` }, 201);
+});
+
+admin.delete("/venues/:id/access-link", async (c) => {
+  const venueId = c.req.param("id");
+  const [result] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      "UPDATE venue_access_links SET revoked_at = datetime('now') WHERE venue_id = ? AND revoked_at IS NULL",
+    ).bind(venueId),
+    audit(c.env.DB, "admin", "access_link.revoke", null, venueId),
+  ]);
+  if (!result.meta.changes) return c.json({ error: "access_link_not_found" }, 404);
+  return c.json({ ok: true });
 });
 
 /* ---------------------------------------------------------------- quadras */
@@ -891,48 +766,23 @@ admin.post("/invoices/:id/reopen", async (c) => {
 
 /* ------------------------------------------------------------------ clips */
 
+
 admin.get("/clips", async (c) => {
-  const venue = c.req.query("venue");
   const date = c.req.query("date") ?? todayBrt();
   if (!isDate(date)) return c.json({ error: "invalid_date" }, 400);
-  const start = brtDayStartUtc(date);
-
-  const { results } = await c.env.DB.prepare(
-    `SELECT cl.id, cl.status, cl.bytes, cl.thumb_key, cl.expires_at, co.name AS court_name,
-            co.public_key AS court_key, v.name AS venue_name,
-            strftime('%H:%M', cl.created_at, '-3 hours') AS time_local,
-            (SELECT COUNT(*) FROM clip_events e WHERE e.clip_id = cl.id AND e.type = 'view') AS views,
-            (SELECT COUNT(*) FROM clip_events e WHERE e.clip_id = cl.id AND e.type = 'download') AS downloads
-     FROM clips cl
-     JOIN courts co ON co.id = cl.court_id
-     JOIN venues v ON v.id = co.venue_id
-     WHERE (? IS NULL OR co.venue_id = ?)
-       AND cl.created_at >= ? AND cl.created_at < datetime(?, '+1 day')
-     ORDER BY cl.created_at DESC
-     LIMIT 300`,
-  )
-    .bind(venue ?? null, venue ?? null, start, start)
-    .all<Row>();
-
-  return c.json({
-    date,
-    clips: results.map(({ thumb_key, ...clip }) => ({
-      ...clip,
-      thumb_url: thumb_key ? `/clips/${clip.id}/thumb.jpg` : null,
-      play_url: `/clips/${clip.id}`,
-    })),
-  });
+  const clips = await clipsForDay(c.env.DB, date, c.req.query("venue") ?? null);
+  return c.json({ date, clips });
 });
 
 /** Apaga clip (vídeo + miniatura) no R2 + metadados no D1. Takedown/LGPD. */
 admin.delete("/clips/:clipId", async (c) => {
   const clipId = c.req.param("clipId");
-  const clip = await c.env.DB.prepare("SELECT id, object_key, thumb_key FROM clips WHERE id = ?")
+  const venue = await c.env.DB.prepare(
+    "SELECT co.venue_id FROM clips cl JOIN courts co ON co.id = cl.court_id WHERE cl.id = ?",
+  )
     .bind(clipId)
-    .first<{ id: string; object_key: string; thumb_key: string | null }>();
-  if (!clip) return c.json({ error: "clip_not_found" }, 404);
-
-  await c.env.CLIPS.delete(clip.thumb_key ? [clip.object_key, clip.thumb_key] : [clip.object_key]);
-  await c.env.DB.prepare("DELETE FROM clips WHERE id = ?").bind(clipId).run();
+    .first<{ venue_id: string }>();
+  if (!(await deleteClip(c.env, clipId))) return c.json({ error: "clip_not_found" }, 404);
+  await audit(c.env.DB, "admin", "clip.delete", clipId, venue?.venue_id ?? null).run();
   return c.json({ ok: true, clip_id: clipId, deleted: true });
 });

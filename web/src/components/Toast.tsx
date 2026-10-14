@@ -10,7 +10,7 @@ export function Toast({ message, onClick }: Props) {
       <button
         type="button"
         onClick={onClick}
-        className="animate-rise-in pointer-events-auto inline-flex items-center gap-2 rounded-full bg-lime px-4 py-2 text-sm font-bold text-ink shadow-[0_12px_40px_-8px_rgb(215_255_58/0.6)]"
+        className="animate-rise-in pointer-events-auto inline-flex items-center gap-2 rounded-full bg-lime px-4 py-2 text-sm font-bold text-ink shadow-[0_12px_40px_-8px_color-mix(in_oklab,var(--color-lime)_60%,transparent)]"
         role="status"
       >
         <Sparkles className="size-4" />
