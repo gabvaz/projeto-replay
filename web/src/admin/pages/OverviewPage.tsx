@@ -44,14 +44,18 @@ function AlertItem({ alert }: { alert: Alert }) {
 }
 
 export function OverviewPage() {
-  const q = useQuery({ queryKey: ["overview"], queryFn: () => get<Overview>("/overview"), refetchInterval: 60_000 });
+  const q = useQuery({
+    queryKey: ["overview"],
+    queryFn: () => get<Overview>("/overview"),
+    refetchOnWindowFocus: false,
+  });
   if (!q.data) return <Loading />;
   const o = q.data;
   const toReceive = Math.max(0, Number(o.finance.due_month_cents) - Number(o.finance.paid_month_cents));
 
   return (
     <>
-      <PageHeader title="Visão geral" subtitle={`Hoje, ${dateBr(o.today)} · atualiza a cada minuto`} />
+      <PageHeader title="Visão geral" subtitle={`Hoje, ${dateBr(o.today)}`} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <Kpi

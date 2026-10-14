@@ -15,7 +15,11 @@ import { EquipmentModal, EquipmentTable, equipmentTotal } from "../equipment";
 import { Button, Card, inputCls, Kpi, Loading, PageHeader } from "../ui";
 
 export function EquipmentPage() {
-  const q = useQuery({ queryKey: ["equipment"], queryFn: () => get<{ equipment: EquipmentRow[] }>("/equipment") });
+  const q = useQuery({
+    queryKey: ["equipment"],
+    queryFn: () => get<{ equipment: EquipmentRow[] }>("/equipment"),
+    refetchOnWindowFocus: false,
+  });
   const [creating, setCreating] = useState(false);
   const [status, setStatus] = useState<EquipmentStatus | "">("");
   const [kind, setKind] = useState<EquipmentKind | "">("");
