@@ -23,5 +23,12 @@
       "binding": "CLIPS",
       "bucket_name": "replay-clips"
     }
-  ]
+  ],
+  "vars": {
+    "RETENTION_DAYS": "7"
+  },
+  "triggers": {
+    // 06:17 UTC = 03:17 BRT
+    "crons": ["17 6 * * *"]
+  }
 }
