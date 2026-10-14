@@ -12,7 +12,7 @@ import {
   type EquipmentStatus,
 } from "../api";
 import { EquipmentModal, EquipmentTable, equipmentTotal } from "../equipment";
-import { Button, Card, inputCls, Kpi, Loading, PageHeader } from "../ui";
+import { Button, Card, inputCls, Kpi, Loading, PageHeader } from "../../shared/ui";
 
 export function EquipmentPage() {
   const q = useQuery({

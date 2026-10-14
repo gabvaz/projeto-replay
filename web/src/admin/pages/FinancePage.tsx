@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { brl, get, type Invoice, type Overview } from "../api";
 import { InvoiceTable } from "../invoices";
-import { Card, Kpi, Loading, PageHeader, Tabs } from "../ui";
+import { Card, Kpi, Loading, PageHeader, Tabs } from "../../shared/ui";
 
 type Filter = "open" | "overdue" | "paid" | "void" | "all";
 

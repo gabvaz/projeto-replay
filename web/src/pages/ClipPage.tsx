@@ -15,6 +15,7 @@ import {
 import { AppHeader } from "../components/AppHeader";
 import { ClipCard } from "../components/ClipCard";
 import { ShareButton } from "../components/ShareButton";
+import { BrandLogo, BrandScope } from "../shared/brand";
 
 type NavState = { thumb?: string | null } | null;
 
@@ -27,7 +28,7 @@ function Player({ clip, placeholder }: { clip?: ClipDetail; placeholder?: string
   return (
     <div
       style={{ viewTransitionName: "clip-media" }}
-      className="relative mx-auto aspect-[9/16] max-h-[78svh] w-full max-w-[44svh] overflow-hidden rounded-3xl bg-black shadow-[0_30px_80px_-30px_rgb(215_255_58/0.35)] ring-1 ring-line"
+      className="relative mx-auto aspect-[9/16] max-h-[78svh] w-full max-w-[44svh] overflow-hidden rounded-3xl bg-black shadow-[0_30px_80px_-30px_color-mix(in_oklab,var(--color-lime)_35%,transparent)] ring-1 ring-line"
     >
       {clip ? (
         <video
@@ -59,7 +60,7 @@ function Player({ clip, placeholder }: { clip?: ClipDetail; placeholder?: string
           aria-label="Assistir replay"
           className="group absolute inset-0 flex items-center justify-center bg-gradient-to-t from-black/60 via-transparent to-black/20"
         >
-          <span className="flex size-20 items-center justify-center rounded-full bg-lime text-ink shadow-[0_0_0_10px_rgb(215_255_58/0.18),0_20px_50px_-10px_rgb(215_255_58/0.7)] transition group-hover:scale-105 group-active:scale-95 group-disabled:opacity-60">
+          <span className="flex size-20 items-center justify-center rounded-full bg-lime text-ink shadow-[0_0_0_10px_color-mix(in_oklab,var(--color-lime)_18%,transparent),0_20px_50px_-10px_color-mix(in_oklab,var(--color-lime)_70%,transparent)] transition group-hover:scale-105 group-active:scale-95 group-disabled:opacity-60">
             <Play className="size-8 translate-x-0.5 fill-current" />
           </span>
         </button>
@@ -141,7 +142,7 @@ function ClipView({ id }: { id: string }) {
   const c = clip.data;
 
   return (
-    <>
+    <BrandScope color={c?.brand?.color}>
       <AppHeader backTo={c ? `/q/${c.court_key}` : undefined} backLabel={c?.court_name} />
       <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pt-1 pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
         <Player clip={c} placeholder={nav?.thumb} />
@@ -149,7 +150,8 @@ function ClipView({ id }: { id: string }) {
         <div className="animate-rise-in flex flex-col items-center gap-2 text-center">
           {c ? (
             <>
-              <p className="text-xs font-semibold tracking-[0.18em] text-zinc-400 uppercase">
+              <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.18em] text-zinc-400 uppercase">
+                <BrandLogo brand={c.brand} className="size-7" />
                 {c.venue_name} · {c.court_name}
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
@@ -177,7 +179,7 @@ function ClipView({ id }: { id: string }) {
             <a
               href={c.download_url}
               download
-              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-lime px-4 py-3.5 text-base font-bold text-ink shadow-[0_10px_30px_-10px_rgb(215_255_58/0.7)] transition hover:brightness-110 active:scale-[0.98]"
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-lime px-4 py-3.5 text-base font-bold text-ink shadow-[0_10px_30px_-10px_color-mix(in_oklab,var(--color-lime)_70%,transparent)] transition hover:brightness-110 active:scale-[0.98]"
             >
               <Download className="size-5" />
               Baixar
@@ -190,7 +192,7 @@ function ClipView({ id }: { id: string }) {
           </div>
         </div>
       )}
-    </>
+    </BrandScope>
   );
 }
 

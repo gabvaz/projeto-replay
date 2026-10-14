@@ -13,7 +13,7 @@ import {
   type Contract,
   type Invoice,
 } from "./api";
-import { Badge, Button, Empty, ErrorNote, Field, inputCls, Modal, Table } from "./ui";
+import { Badge, Button, Empty, ErrorNote, Field, inputCls, Modal, Table } from "../shared/ui";
 
 export function InvoiceStatus({ inv }: { inv: Invoice }) {
   if (inv.status === "paid") return <Badge tone="lime">Pago {inv.paid_at ? dateBr(inv.paid_at).slice(0, 5) : ""}</Badge>;

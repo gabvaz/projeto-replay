@@ -12,6 +12,7 @@ import { HourGroup } from "../components/HourGroup";
 import { Logo } from "../components/Logo";
 import { GallerySkeleton } from "../components/Skeletons";
 import { Toast } from "../components/Toast";
+import { BrandScope } from "../shared/brand";
 
 const POLL_MS = 15_000;
 const TOAST_MS = 4_000;
@@ -93,7 +94,7 @@ export function CourtPage() {
   const groups = groupByHour(featured ? list.slice(1) : list);
 
   return (
-    <>
+    <BrandScope color={court.data?.brand?.color}>
       <AppHeader />
       <Toast
         message={toast}
@@ -106,6 +107,7 @@ export function CourtPage() {
         <CourtHero
           venueName={court.data?.venue_name}
           courtName={court.data?.name}
+          brand={court.data?.brand}
           isToday={isToday}
           count={clips.data ? list.length : undefined}
         />
@@ -136,6 +138,6 @@ export function CourtPage() {
             : `Vídeos ficam disponíveis por ${court.data?.retention_days ?? 7} dias`}
         </footer>
       </main>
-    </>
+    </BrandScope>
   );
 }

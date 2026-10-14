@@ -44,7 +44,7 @@ export function DayPicker({ today, days, value, onChange }: Props) {
             aria-pressed={active}
             className={`flex w-16 shrink-0 snap-start flex-col items-center rounded-2xl border py-2 transition active:scale-95 ${
               active
-                ? "border-lime bg-lime text-ink shadow-[0_8px_30px_-8px_rgb(215_255_58/0.6)]"
+                ? "border-lime bg-lime text-ink shadow-[0_8px_30px_-8px_color-mix(in_oklab,var(--color-lime)_60%,transparent)]"
                 : "border-line bg-surface text-zinc-300 hover:border-zinc-600"
             }`}
           >

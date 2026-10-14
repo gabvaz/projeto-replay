@@ -87,3 +87,66 @@ export const adminAuth: MiddlewareHandler<Env> = async (c, next) => {
   c.set("sessionExp", exp);
   await next();
 };
+
+/* ------------------------------------------------------- portal da arena */
+
+const ARENA_COOKIE = "rs_arena";
+const ARENA_TTL_SEC = 30 * 24 * 60 * 60;
+
+async function arenaKey(env: Bindings): Promise<CryptoKey> {
+  const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`arena|${env.SESSION_SECRET}`));
+  return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+}
+
+async function arenaSign(env: Bindings, value: string): Promise<string> {
+  return toHex(await crypto.subtle.sign("HMAC", await arenaKey(env), new TextEncoder().encode(value)));
+}
+
+/**
+ * Troca o token do link por sessão. Lax: o link chega por WhatsApp (navegação cross-site);
+ * as mutações continuam protegidas pela exigência de JSON.
+ */
+export async function startArenaSession(c: Context<Env>, linkId: string): Promise<void> {
+  const exp = Math.floor(Date.now() / 1000) + ARENA_TTL_SEC;
+  const value = `${linkId}.${exp}`;
+  setCookie(c, ARENA_COOKIE, `${value}.${await arenaSign(c.env, value)}`, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: ARENA_TTL_SEC,
+  });
+}
+
+export function endArenaSession(c: Context<Env>): void {
+  deleteCookie(c, ARENA_COOKIE, { path: "/", secure: true });
+}
+
+/** Cookie válido + link ainda ativo (revogar derruba a sessão na hora). */
+export const arenaAuth: MiddlewareHandler<Env> = async (c, next) => {
+  const [linkId, expStr, sig] = getCookie(c, ARENA_COOKIE)?.split(".") ?? [];
+  const exp = Number(expStr);
+  if (!sig || !c.env.SESSION_SECRET || !Number.isFinite(exp) || exp * 1000 < Date.now()) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  if (!safeEqual(sig, await arenaSign(c.env, `${linkId}.${expStr}`))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  const link = await c.env.DB.prepare(
+    "SELECT venue_id FROM venue_access_links WHERE id = ? AND revoked_at IS NULL",
+  )
+    .bind(linkId)
+    .first<{ venue_id: string }>();
+  if (!link) {
+    endArenaSession(c);
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  const mutating = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
+  const ct = c.req.header("content-type") ?? "";
+  if (mutating && !ct.includes("application/json") && c.req.header("x-requested-with") !== "replay") {
+    return c.json({ error: "json_required" }, 415);
+  }
+  c.set("venueId", link.venue_id);
+  await next();
+};

@@ -7,7 +7,7 @@ function ButtonIllustration() {
       <span className="animate-ring absolute size-24 rounded-full border-2 border-lime" />
       <span className="animate-ring absolute size-24 rounded-full border-2 border-lime [animation-delay:0.3s]" />
       <div className="relative size-24 rounded-full bg-surface-2 shadow-[inset_0_-6px_0_rgb(0_0_0/0.5)] ring-1 ring-line">
-        <div className="animate-press absolute inset-3 rounded-full bg-lime shadow-[0_6px_0_var(--color-lime-dim),0_0_40px_rgb(215_255_58/0.35)]" />
+        <div className="animate-press absolute inset-3 rounded-full bg-lime shadow-[0_6px_0_var(--color-lime-dim),0_0_40px_color-mix(in_oklab,var(--color-lime)_35%,transparent)]" />
       </div>
     </div>
   );
