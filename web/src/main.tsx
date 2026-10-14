@@ -13,6 +13,7 @@ import { HomePage } from "./pages/HomePage";
 import "./index.css";
 
 const QrPage = lazy(() => import("./pages/QrPage").then((m) => ({ default: m.QrPage })));
+const AdminApp = lazy(() => import("./admin/AdminApp"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,6 +36,14 @@ const router = createBrowserRouter([
     ),
   },
   { path: "/v/:id", element: <ClipPage /> },
+  {
+    path: "/painel/*",
+    element: (
+      <Suspense fallback={<div className="min-h-svh bg-ink" />}>
+        <AdminApp />
+      </Suspense>
+    ),
+  },
   { path: "*", element: <HomePage /> },
 ]);
 
