@@ -1,11 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams, useSearchParams } from "react-router";
+import { SearchX } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router";
 import { fetchClips, fetchCourt, NotFoundError, type ClipSummary } from "../api";
+import { AppHeader } from "../components/AppHeader";
+import { CourtHero } from "../components/CourtHero";
 import { DayPicker } from "../components/DayPicker";
+import { EmptyState } from "../components/EmptyState";
+import { FeaturedClip } from "../components/FeaturedClip";
 import { HourGroup } from "../components/HourGroup";
-import { VenueHeader } from "../components/VenueHeader";
+import { Logo } from "../components/Logo";
+import { GallerySkeleton } from "../components/Skeletons";
+import { Toast } from "../components/Toast";
 
 const POLL_MS = 15_000;
+const TOAST_MS = 4_000;
 
 function groupByHour(clips: ClipSummary[]): { hour: number; clips: ClipSummary[] }[] {
   const groups = new Map<number, ClipSummary[]>();
@@ -17,6 +26,27 @@ function groupByHour(clips: ClipSummary[]): { hour: number; clips: ClipSummary[]
   return [...groups.entries()]
     .sort(([a], [b]) => b - a)
     .map(([hour, list]) => ({ hour, clips: list }));
+}
+
+/** Avisa quando o poll traz clip que não estava na lista anterior. */
+function useNewClipToast(clips: ClipSummary[] | undefined, date: string | undefined) {
+  const seen = useRef<{ date?: string; ids: Set<string> } | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!clips) return;
+    const ids = new Set(clips.map((c) => c.id));
+    const prev = seen.current;
+    seen.current = { date, ids };
+    if (!prev || prev.date !== date) return;
+    const fresh = clips.filter((c) => !prev.ids.has(c.id)).length;
+    if (fresh === 0) return;
+    setMessage(fresh === 1 ? "Novo replay chegou!" : `${fresh} replays novos!`);
+    const t = setTimeout(() => setMessage(null), TOAST_MS);
+    return () => clearTimeout(t);
+  }, [clips, date]);
+
+  return [message, () => setMessage(null)] as const;
 }
 
 export function CourtPage() {
@@ -35,21 +65,51 @@ export function CourtPage() {
     refetchInterval: isToday ? POLL_MS : false,
   });
 
+  const [toast, dismissToast] = useNewClipToast(clips.data?.clips, date);
+
   if (court.error instanceof NotFoundError) {
     return (
       <>
-        <VenueHeader />
-        <p className="px-6 py-20 text-center text-zinc-400">Quadra não encontrada.</p>
+        <AppHeader />
+        <main className="animate-rise-in mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-20 text-center">
+          <SearchX className="size-12 text-zinc-600" />
+          <h1 className="font-display text-4xl leading-none font-black uppercase italic">
+            Quadra não encontrada
+          </h1>
+          <p className="text-zinc-400">
+            Confira o código <span className="font-mono text-zinc-200">{key}</span> ou escaneie de
+            novo o QR ao lado do botão.
+          </p>
+          <Link to="/" className="mt-2 rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink">
+            Voltar ao início
+          </Link>
+        </main>
       </>
     );
   }
 
-  const groups = groupByHour(clips.data?.clips ?? []);
+  const list = clips.data?.clips ?? [];
+  const featured = isToday ? list[0] : undefined;
+  const groups = groupByHour(featured ? list.slice(1) : list);
 
   return (
     <>
-      <VenueHeader venueName={court.data?.venue_name} courtName={court.data?.name} />
-      <main className="mx-auto flex max-w-2xl flex-col gap-6 px-4 py-4">
+      <AppHeader />
+      <Toast
+        message={toast}
+        onClick={() => {
+          dismissToast();
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }}
+      />
+      <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-10">
+        <CourtHero
+          venueName={court.data?.venue_name}
+          courtName={court.data?.name}
+          isToday={isToday}
+          count={clips.data ? list.length : undefined}
+        />
+
         {today && (
           <DayPicker
             today={today}
@@ -59,24 +119,22 @@ export function CourtPage() {
           />
         )}
 
-        {clips.isPending && <p className="py-10 text-center text-zinc-500">Carregando…</p>}
+        {clips.isPending && <GallerySkeleton />}
 
-        {clips.data && groups.length === 0 && (
-          <div className="py-16 text-center">
-            <p className="text-lg font-semibold">Nenhum replay {isToday ? "ainda" : "neste dia"}.</p>
-            {isToday && (
-              <p className="mt-1 text-zinc-400">Aperte o botão na quadra — o vídeo aparece aqui em segundos.</p>
-            )}
-          </div>
-        )}
+        {clips.data && list.length === 0 && <EmptyState isToday={isToday} />}
+
+        {featured && <FeaturedClip key={featured.id} clip={featured} />}
 
         {groups.map((g) => (
-          <HourGroup key={g.hour} hour={g.hour} clips={g.clips} />
+          <HourGroup key={g.hour} hour={g.hour} clips={g.clips} isToday={isToday} />
         ))}
 
-        {isToday && clips.data && (
-          <p className="pb-6 text-center text-xs text-zinc-600">Atualiza sozinho a cada 15s</p>
-        )}
+        <footer className="mt-6 flex flex-col items-center gap-2 text-center text-xs text-zinc-600">
+          <Logo iconOnly className="opacity-50" />
+          {isToday && clips.data
+            ? "Atualiza sozinho a cada 15s"
+            : `Vídeos ficam disponíveis por ${court.data?.retention_days ?? 7} dias`}
+        </footer>
       </main>
     </>
   );

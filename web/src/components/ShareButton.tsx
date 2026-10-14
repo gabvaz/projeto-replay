@@ -1,3 +1,4 @@
+import { Check, Loader2, Send, Share2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { sendEvent } from "../api";
 
@@ -73,19 +74,23 @@ export function ShareButton({ clipId, videoUrl, title }: Props) {
   const text = {
     idle: "Compartilhar",
     loading: "Preparando…",
-    "tap-again": "Toque pra compartilhar",
+    "tap-again": "Toque pra enviar",
     copied: "Link copiado!",
   }[state];
+  const Icon = { idle: Share2, loading: Loader2, "tap-again": Send, copied: Check }[state];
 
   return (
     <button
       type="button"
       onClick={share}
       disabled={state === "loading"}
-      className={`flex-1 rounded-xl px-4 py-3 text-base font-semibold transition disabled:opacity-60 ${
-        state === "tap-again" ? "bg-brand text-zinc-950" : "bg-zinc-800 hover:bg-zinc-700"
+      className={`flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-base font-bold transition active:scale-[0.98] disabled:opacity-70 ${
+        state === "tap-again"
+          ? "animate-pulse bg-lime text-ink"
+          : "border border-line bg-surface-2 text-white hover:border-zinc-600"
       }`}
     >
+      <Icon className={`size-5 ${state === "loading" ? "animate-spin" : ""}`} />
       {text}
     </button>
   );
