@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand: #22c55e;
+}
+
+@media print {
+  body {
+    background: #fff;
+    color: #000;
+  }
+}

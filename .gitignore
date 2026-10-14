@@ -9,5 +9,5 @@ dist/
 edge/.buffer/
 edge/.clips/
 edge/.loadtest-6cam/
-edge/.clips/
 edge/.env
+web/dist/
