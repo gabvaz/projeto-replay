@@ -8,6 +8,13 @@ export type Bindings = {
   RETENTION_DAYS?: string;
   DEVICE_OFFLINE_SEC?: string;
   SUPPORT_WHATSAPP?: string;
+  /** URL pública (links nos e-mails). */
+  APP_URL?: string;
+  /** Opcional até o domínio estar no Email Routing; sem ele o alerta só vai pro log. */
+  EMAIL?: SendEmail;
+  ALERT_EMAIL_FROM?: string;
+  /** Vírgula separa vários; precisam ser destinos verificados no Email Routing. */
+  ALERT_EMAIL_TO?: string;
 };
 
 export type Device = {
@@ -63,6 +70,19 @@ export function todayBrt(): string {
 export function brtDayStartUtc(date: string): string {
   const d = new Date(`${date}T00:00:00Z`);
   return new Date(d.getTime() + BRT_OFFSET_MS).toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** Date → "YYYY-MM-DD HH:MM:SS" (UTC), o formato do datetime('now') do D1. */
+export function sqlTime(d: Date): string {
+  return d.toISOString().slice(0, 19).replace("T", " ");
+}
+
+/** Horário vindo do Pi: aceita só ISO válido dentro de [agora - maxAgeMs, agora + 1 min]. */
+export function pastTime(v: unknown, maxAgeMs: number): string | null {
+  if (typeof v !== "string") return null;
+  const t = Date.parse(v);
+  if (!Number.isFinite(t) || t < Date.now() - maxAgeMs || t > Date.now() + 60_000) return null;
+  return sqlTime(new Date(Math.min(t, Date.now())));
 }
 
 export function randomHex(bytes: number): string {

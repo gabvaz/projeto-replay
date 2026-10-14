@@ -88,6 +88,17 @@ export type DevicePayload = {
   mem_free_mb?: number;
   mem_total_mb?: number;
   uptime_s?: number;
+  queue_len?: number;
+  button_alive?: boolean;
+  ffmpeg_restarts?: number;
+  ffmpeg_restarts_1h?: number;
+};
+
+export type DeviceEventType = "press" | "clip_ok" | "clip_fail" | "ffmpeg_restart" | "boot" | "queue_drop";
+
+export type DeviceEvents = {
+  events: { id: number; type: DeviceEventType; detail: string | null; created_at: string }[];
+  alerts: { id: number; kind: string; detail: string | null; opened_at: string; resolved_at: string | null }[];
 };
 
 export type DeviceRow = {
@@ -103,6 +114,9 @@ export type DeviceRow = {
   created_at: string;
   online: boolean;
   issues: string[];
+  press_7d: number;
+  clip_ok_7d: number;
+  clip_fail_7d: number;
 };
 
 export type EquipmentKind = "camera" | "pi" | "switch" | "esp32" | "button" | "adapter" | "other";

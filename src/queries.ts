@@ -6,6 +6,8 @@ import { brtDayStartUtc, deviceOfflineSec, randomHex, todayBrt, type Bindings, t
 export type Row = Record<string, unknown>;
 
 const HOT_TEMP_C = 75;
+const QUEUE_ALERT = 3;
+const FFMPEG_RESTARTS_ALERT = 3;
 
 export async function readBody<T>(c: Context<Env>): Promise<Partial<T>> {
   return c.req.json<Partial<T>>().catch((): Partial<T> => ({}));
@@ -39,7 +41,7 @@ export function addMonth(period: string): string {
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
 }
 
-function parsePayload(raw: unknown): Row | null {
+export function parsePayload(raw: unknown): Row | null {
   if (typeof raw !== "string") return null;
   try {
     return JSON.parse(raw) as Row;
@@ -48,16 +50,34 @@ function parsePayload(raw: unknown): Row | null {
   }
 }
 
-/** Anomalias do heartbeat que viram alerta no painel (e forçam histórico no D1). */
-export function payloadIssues(p: Row | null): string[] {
+export type Issue = { code: string; text: string };
+
+/**
+ * Anomalias do heartbeat: viram alerta no painel, forçam histórico no D1 e abrem alerta por
+ * e-mail (o `code` é estável pro dedupe; o `text` muda com o valor).
+ */
+export function payloadIssueList(p: Row | null): Issue[] {
   if (!p) return [];
-  const issues: string[] = [];
-  if (typeof p.temp_c === "number" && p.temp_c >= HOT_TEMP_C) issues.push(`temp ${p.temp_c.toFixed(0)}°C`);
-  if (typeof p.throttled === "string" && !/^0x0$|^0$/.test(p.throttled)) {
-    issues.push(`throttled ${p.throttled}`);
+  const issues: Issue[] = [];
+  if (typeof p.temp_c === "number" && p.temp_c >= HOT_TEMP_C) {
+    issues.push({ code: "hot", text: `temp ${p.temp_c.toFixed(0)}°C` });
   }
-  if (p.buffer_alive === false) issues.push("buffer parado");
+  if (typeof p.throttled === "string" && !/^0x0$|^0$/.test(p.throttled)) {
+    issues.push({ code: "throttled", text: `throttled ${p.throttled}` });
+  }
+  if (p.buffer_alive === false) issues.push({ code: "buffer", text: "buffer parado" });
+  if (typeof p.queue_len === "number" && p.queue_len > QUEUE_ALERT) {
+    issues.push({ code: "queue", text: `${p.queue_len} clips na fila` });
+  }
+  if (p.button_alive === false) issues.push({ code: "button", text: "botão sem sinal" });
+  if (typeof p.ffmpeg_restarts_1h === "number" && p.ffmpeg_restarts_1h >= FFMPEG_RESTARTS_ALERT) {
+    issues.push({ code: "camera", text: `câmera reiniciou ${p.ffmpeg_restarts_1h}x/h` });
+  }
   return issues;
+}
+
+export function payloadIssues(p: Row | null): string[] {
+  return payloadIssueList(p).map((i) => i.text);
 }
 
 export function withDeviceStatus(d: Row): Row {
@@ -122,12 +142,21 @@ export const courtsStmt = (db: D1Database, venueId: string) =>
     )
     .bind(venueId);
 
+/** Apertos e clips enviados em 7 dias (tabela `d` = devices): a métrica principal do piloto. */
+export const DEVICE_STATS_SQL = ["press", "clip_ok", "clip_fail"]
+  .map(
+    (t) => `(SELECT COUNT(*) FROM device_events e WHERE e.device_id = d.id AND e.type = '${t}'
+             AND e.created_at > datetime('now', '-7 days')) AS ${t}_7d`,
+  )
+  .join(",\n");
+
 export const devicesStmt = (db: D1Database, env: Bindings, venueId: string) =>
   db
     .prepare(
-      `SELECT id, kind, name, agent_version, last_seen_at, last_payload, revoked_at, created_at,
-              CASE WHEN last_seen_at > datetime('now', ?) THEN 1 ELSE 0 END AS online
-       FROM devices WHERE venue_id = ? ORDER BY revoked_at IS NOT NULL, name`,
+      `SELECT d.id, d.kind, d.name, d.agent_version, d.last_seen_at, d.last_payload, d.revoked_at,
+              d.created_at, CASE WHEN d.last_seen_at > datetime('now', ?) THEN 1 ELSE 0 END AS online,
+              ${DEVICE_STATS_SQL}
+       FROM devices d WHERE d.venue_id = ? ORDER BY d.revoked_at IS NOT NULL, d.name`,
     )
     .bind(offlineWindow(env), venueId);
 

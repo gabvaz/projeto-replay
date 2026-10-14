@@ -1,0 +1,23 @@
+[Unit]
+Description=Replay edge agent
+Wants=network-online.target
+After=network-online.target
+# Nunca desiste de reiniciar (queda de câmera/rede não pode deixar a quadra parada).
+StartLimitIntervalSec=0
+
+[Service]
+User=replay
+Group=replay
+SupplementaryGroups=dialout video
+EnvironmentFile=/etc/replay/edge.env
+WorkingDirectory=/opt/replay
+ExecStart=/usr/local/bin/node /opt/replay/agent.mjs
+Restart=always
+RestartSec=3
+MemoryMax=500M
+Nice=-5
+KillMode=control-group
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

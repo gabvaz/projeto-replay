@@ -48,10 +48,19 @@
     // Sem heartbeat há mais que isso = offline (agent manda a cada 60s)
     "DEVICE_OFFLINE_SEC": "180",
     // WhatsApp de suporte mostrado no portal da arena (só dígitos, com DDI). Vazio = esconde.
-    "SUPPORT_WHATSAPP": ""
+    "SUPPORT_WHATSAPP": "",
+    // Links nos e-mails de alerta
+    "APP_URL": "https://projeto-replay.gabrieltenoriovaz-10a.workers.dev",
+    // Remetente precisa ser do domínio com Email Routing; destino, endereço verificado nele.
+    // Vazio = alerta/resumo só no log (wrangler tail).
+    "ALERT_EMAIL_FROM": "",
+    "ALERT_EMAIL_TO": ""
   },
+  // Descomentar quando o domínio estiver no Email Routing (envio p/ destino verificado é grátis).
+  // "send_email": [{ "name": "EMAIL" }],
   "triggers": {
-    // Pausado até ir pra produção. Reativar: ["17 6 * * *"] (06:17 UTC = 03:17 BRT)
-    "crons": []
+    // Strings iguais a CRON_ALERTS / CRON_DAILY em src/jobs.ts.
+    // */5: alertas de equipamento · 09:00 UTC (06:00 BRT): retenção, faturas e resumo do dia
+    "crons": ["*/5 * * * *", "0 9 * * *"]
   }
 }

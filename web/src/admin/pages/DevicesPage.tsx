@@ -28,7 +28,7 @@ export function DevicesPage() {
       <PageHeader title="Dispositivos" subtitle="Saúde dos Pi em campo · atualiza a cada 30s" />
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi label="Online" value={`${active.length - offline.length}/${active.length}`} tone={offline.length ? "red" : "lime"} />
-        <Kpi label="Com alerta" value={issues.length} tone={issues.length ? "amber" : undefined} hint="temp., throttling, buffer" />
+        <Kpi label="Com alerta" value={issues.length} tone={issues.length ? "amber" : undefined} hint="temp., buffer, fila, botão, câmera" />
         <Kpi
           label="Versões"
           value={versions.size}

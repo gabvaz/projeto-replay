@@ -8,6 +8,7 @@ import {
   clipsForDay,
   courtsStmt,
   deleteClip,
+  DEVICE_STATS_SQL,
   devicesStmt,
   ensureInvoices,
   invoicesStmt,
@@ -457,7 +458,8 @@ admin.get("/devices", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT d.id, d.venue_id, v.name AS venue_name, d.kind, d.name, d.agent_version,
             d.last_seen_at, d.last_payload, d.revoked_at, d.created_at,
-            CASE WHEN d.last_seen_at > datetime('now', ?) THEN 1 ELSE 0 END AS online
+            CASE WHEN d.last_seen_at > datetime('now', ?) THEN 1 ELSE 0 END AS online,
+            ${DEVICE_STATS_SQL}
      FROM devices d JOIN venues v ON v.id = d.venue_id
      WHERE (? IS NULL OR d.venue_id = ?)
      ORDER BY d.revoked_at IS NOT NULL, v.name, d.name`,
@@ -465,6 +467,22 @@ admin.get("/devices", async (c) => {
     .bind(offlineWindow(c.env), venue ?? null, venue ?? null)
     .all<Row>();
   return c.json({ devices: results.map(withDeviceStatus) });
+});
+
+/** Linha do tempo do agente (apertos, falhas, reinícios) + alertas recentes. */
+admin.get("/devices/:id/events", async (c) => {
+  const id = c.req.param("id");
+  const [events, alerts] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      `SELECT id, type, detail, created_at FROM device_events
+       WHERE device_id = ? ORDER BY created_at DESC, id DESC LIMIT 100`,
+    ).bind(id),
+    c.env.DB.prepare(
+      `SELECT id, kind, detail, opened_at, resolved_at FROM alerts
+       WHERE device_id = ? ORDER BY opened_at DESC LIMIT 20`,
+    ).bind(id),
+  ]);
+  return c.json({ events: events.results, alerts: alerts.results });
 });
 
 admin.post("/devices/:id/revoke", async (c) => {

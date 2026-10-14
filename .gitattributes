@@ -1,0 +1,4 @@
+# Arquivos que rodam no Pi: CRLF quebra bash/systemd/udev.
+*.sh text eol=lf
+*.service text eol=lf
+*.rules text eol=lf
