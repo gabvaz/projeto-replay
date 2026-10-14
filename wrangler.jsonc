@@ -24,6 +24,22 @@
       "bucket_name": "replay-clips"
     }
   ],
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // /__scheduled: só existe no `wrangler dev --test-scheduled`
+    "run_worker_first": [
+      "/api/*",
+      "/edge/*",
+      "/admin/*",
+      "/clips/*",
+      "/courts/*",
+      "/c/*",
+      "/v/*",
+      "/__scheduled"
+    ]
+  },
   "vars": {
     "RETENTION_DAYS": "7"
   },

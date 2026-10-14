@@ -57,7 +57,10 @@ const API_BASE = (
 ).replace(/\/$/, "");
 const COURT_KEY = process.env.COURT_KEY ?? "demo01";
 const EDGE_TOKEN = process.env.EDGE_TOKEN?.trim() || "";
-const AGENT_VERSION = "0.2.0";
+const AGENT_VERSION = "0.3.0";
+/** Câmera instalada deitada → flag de rotação no MP4 (graus horário, sem re-encode). */
+const CAMERA_ROTATION = Number(process.env.CAMERA_ROTATION ?? 0);
+const THUMB_WIDTH = 480;
 const HEARTBEAT_SEC = Number(process.env.HEARTBEAT_SEC ?? 60);
 const RTSP_URL = process.env.RTSP_URL?.trim() || "";
 const EDGE_PORT = Number(process.env.EDGE_PORT ?? 8788);
@@ -152,6 +155,17 @@ if (!FFMPEG_BIN) {
       "FFMPEG_PATH=C:\\\\caminho\\\\para\\\\ffmpeg.exe",
   );
   process.exit(1);
+}
+
+/** ffmpeg >= 6 ignora a tag "rotate"; usa -display_rotation (anti-horário) na entrada. */
+const FFMPEG_MAJOR = Number(
+  spawnSync(FFMPEG_BIN, ["-version"], { encoding: "utf8" }).stdout?.match(/ffmpeg version n?(\d+)/)?.[1] ?? 0,
+);
+
+function rotationArgs() {
+  if (!CAMERA_ROTATION) return { input: [], output: [] };
+  if (FFMPEG_MAJOR >= 6) return { input: ["-display_rotation", String(-CAMERA_ROTATION)], output: [] };
+  return { input: [], output: ["-metadata:s:v:0", `rotate=${CAMERA_ROTATION}`] };
 }
 
 function spawnFfmpeg(args, opts = {}) {
@@ -273,8 +287,9 @@ async function buildClip() {
   const listBody = window.map((s) => `file '${s.full.replace(/\\/g, "/")}'`).join("\n");
   await writeFile(listPath, listBody, "utf8");
 
-  await new Promise((resolve, reject) => {
-    const proc = spawnFfmpeg([
+  const rotation = rotationArgs();
+  await runFfmpeg(
+    [
       "-hide_banner",
       "-loglevel",
       "error",
@@ -283,19 +298,56 @@ async function buildClip() {
       "concat",
       "-safe",
       "0",
+      ...rotation.input,
       "-i",
       listPath,
       "-c",
       "copy",
+      ...rotation.output,
+      "-movflags",
+      "+faststart",
       outPath,
-    ]);
-    proc.on("exit", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg concat exit ${code}`));
-    });
-  });
+    ],
+    "concat",
+  );
 
   return outPath;
+}
+
+function runFfmpeg(args, label) {
+  return new Promise((resolve, reject) => {
+    const proc = spawnFfmpeg(args);
+    proc.on("exit", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg ${label} exit ${code}`));
+    });
+  });
+}
+
+/** 1 frame perto do fim (o lance) → JPG pequeno. Só decodifica esse frame; o vídeo não é re-encodado. */
+async function buildThumbnail(clipPath) {
+  const thumbPath = clipPath.replace(/\.mp4$/, ".jpg");
+  await runFfmpeg(
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      "-sseof",
+      "-2",
+      "-i",
+      clipPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      `scale=${THUMB_WIDTH}:-2`,
+      "-q:v",
+      "5",
+      thumbPath,
+    ],
+    "thumb",
+  );
+  return thumbPath;
 }
 
 async function uploadClip(filePath) {
@@ -319,10 +371,23 @@ async function uploadClip(filePath) {
     throw new Error(`put ${putRes.status}: ${await putRes.text()}`);
   }
   const result = await putRes.json();
+
+  try {
+    const thumbPath = await buildThumbnail(filePath);
+    const thumbRes = await fetch(`${API_BASE}${slot.thumbnail_url}`, {
+      method: "PUT",
+      headers: { "content-type": "image/jpeg", authorization: `Bearer ${EDGE_TOKEN}` },
+      body: await readFile(thumbPath),
+    });
+    if (!thumbRes.ok) log(`thumbnail ${thumbRes.status}: ${await thumbRes.text()}`);
+  } catch (err) {
+    log("thumbnail falhou (clip segue sem):", err.message ?? err);
+  }
+
   return {
     ...result,
-    gallery: `${API_BASE}/c/${COURT_KEY}`,
-    play: `${API_BASE}${result.play_url}`,
+    gallery: `${API_BASE}/q/${COURT_KEY}`,
+    play: `${API_BASE}/v/${result.clip_id}`,
   };
 }
 
@@ -400,7 +465,7 @@ function startHeartbeat() {
 }
 
 function localRecordPage() {
-  const gallery = `${API_BASE}/c/${COURT_KEY}`;
+  const gallery = `${API_BASE}/q/${COURT_KEY}`;
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
