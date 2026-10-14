@@ -10,7 +10,11 @@
     "db:migrate:local": "wrangler d1 migrations apply replay-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply replay-db --remote",
     "edge": "node edge/agent.mjs",
-    "edge:ui": "node edge/open-ui.mjs"
+    "edge:ui": "node edge/open-ui.mjs",
+    "edge:loadtest-6cam": "node edge/loadtest-6cam.mjs",
+    "edge:loadtest-6cam:encode": "node edge/loadtest-6cam.mjs --mode=encode",
+    "edge:loadtest-pi3": "powershell -ExecutionPolicy Bypass -File edge/run-loadtest-pi3.ps1",
+    "admin:device": "node scripts/create-device.mjs"
   },
   "repository": {
     "type": "git",

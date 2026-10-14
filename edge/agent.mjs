@@ -18,10 +18,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, readdir, rm, writeFile, stat, readFile } from "node:fs/promises";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
+import { freemem, homedir, loadavg, totalmem } from "node:os";
 import readline from "node:readline";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,6 +56,9 @@ const API_BASE = (
   "https://projeto-replay.gabrieltenoriovaz-10a.workers.dev"
 ).replace(/\/$/, "");
 const COURT_KEY = process.env.COURT_KEY ?? "demo01";
+const EDGE_TOKEN = process.env.EDGE_TOKEN?.trim() || "";
+const AGENT_VERSION = "0.2.0";
+const HEARTBEAT_SEC = Number(process.env.HEARTBEAT_SEC ?? 60);
 const RTSP_URL = process.env.RTSP_URL?.trim() || "";
 const EDGE_PORT = Number(process.env.EDGE_PORT ?? 8788);
 const PRE_ROLL_SEC = Number(process.env.PRE_ROLL_SEC ?? 15);
@@ -296,9 +299,9 @@ async function buildClip() {
 }
 
 async function uploadClip(filePath) {
-  const slotRes = await fetch(`${API_BASE}/clips/upload-slot`, {
+  const slotRes = await fetch(`${API_BASE}/edge/clips/upload-slot`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", authorization: `Bearer ${EDGE_TOKEN}` },
     body: JSON.stringify({ court_key: COURT_KEY }),
   });
   if (!slotRes.ok) {
@@ -309,7 +312,7 @@ async function uploadClip(filePath) {
 
   const putRes = await fetch(`${API_BASE}${slot.upload_url}`, {
     method: "PUT",
-    headers: { "content-type": "video/mp4" },
+    headers: { "content-type": "video/mp4", authorization: `Bearer ${EDGE_TOKEN}` },
     body: bytes,
   });
   if (!putRes.ok) {
@@ -345,6 +348,55 @@ async function handleReplay(source = "api") {
   } finally {
     busy = false;
   }
+}
+
+function readPiHealth() {
+  const out = {};
+  try {
+    out.temp_c = Number(readFileSync("/sys/class/thermal/thermal_zone0/temp", "utf8")) / 1000;
+  } catch {
+    /* sem sensor (PC) */
+  }
+  const thr = spawnSync("vcgencmd", ["get_throttled"], { encoding: "utf8" });
+  if (thr.status === 0) out.throttled = thr.stdout.trim().replace("throttled=", "");
+  return out;
+}
+
+async function sendHeartbeat() {
+  let segments = 0;
+  try {
+    segments = (await readdir(BUFFER_DIR)).filter((n) => n.endsWith(".ts")).length;
+  } catch {
+    /* buffer ainda não existe */
+  }
+  const payload = {
+    agent_version: AGENT_VERSION,
+    court_key: COURT_KEY,
+    uptime_s: Math.round(process.uptime()),
+    buffer_alive: Boolean(ffmpegProc && ffmpegProc.exitCode === null),
+    segments,
+    busy,
+    load1: loadavg()[0],
+    mem_free_mb: Math.round(freemem() / 1048576),
+    mem_total_mb: Math.round(totalmem() / 1048576),
+    rss_mb: Math.round(process.memoryUsage().rss / 1048576),
+    ...readPiHealth(),
+  };
+  try {
+    const res = await fetch(`${API_BASE}/edge/heartbeat`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${EDGE_TOKEN}` },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) log(`heartbeat ${res.status}: ${await res.text()}`);
+  } catch (err) {
+    log("heartbeat falhou:", err.message ?? err);
+  }
+}
+
+function startHeartbeat() {
+  void sendHeartbeat();
+  setInterval(() => void sendHeartbeat(), HEARTBEAT_SEC * 1000);
 }
 
 function localRecordPage() {
@@ -481,10 +533,16 @@ function shutdown() {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
+if (!EDGE_TOKEN) {
+  console.error("EDGE_TOKEN ausente no edge/.env (gere com: npm run admin:device).");
+  process.exit(1);
+}
+
 await ensureDirs();
 startBuffer();
 startHttp();
 startKeyboard();
+startHeartbeat();
 
 log(`warming buffer ~${PRE_ROLL_SEC + 5}s...`);
 log("trigger: UI local / POST /local/replay / Enter|Espaço|R");
