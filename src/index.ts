@@ -1,22 +1,8 @@
-import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
-
-type Bindings = {
-  DB: D1Database;
-  CLIPS: R2Bucket;
-  ASSETS: Fetcher;
-  ADMIN_TOKEN: string;
-  IP_HASH_SALT?: string;
-  RETENTION_DAYS?: string;
-};
-
-type Device = {
-  id: string;
-  venue_id: string;
-  name: string;
-};
-
-type Env = { Bindings: Bindings; Variables: { device: Device } };
+import { admin, payloadIssues } from "./admin";
+import { adminAuth, edgeAuth } from "./auth";
+import { retentionDays, sha256Hex, todayBrt, type Bindings, type Env } from "./lib";
 
 type ClipRow = {
   id: string;
@@ -34,34 +20,14 @@ type ClipRow = {
 
 type EventType = "view" | "download" | "share";
 
-/** Brasil sem horário de verão desde 2019: UTC-3 fixo. */
-const BRT_OFFSET_MS = 3 * 60 * 60 * 1000;
 const MAX_THUMB_BYTES = 1_000_000;
+const HEARTBEAT_HISTORY_MIN = 15;
 
 const app = new Hono<Env>();
 
 app.use("/api/*", cors());
 app.use("/courts/*", cors());
 app.use("/clips/*", cors());
-
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function bearer(header: string | undefined): string | null {
-  const match = header?.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1].trim() : null;
-}
-
-function retentionDays(env: Bindings): number {
-  const n = Number(env.RETENTION_DAYS ?? 7);
-  return Number.isFinite(n) && n > 0 ? n : 7;
-}
-
-function todayBrt(): string {
-  return new Date(Date.now() - BRT_OFFSET_MS).toISOString().slice(0, 10);
-}
 
 /** Registra view/download/share. IP vira hash com sal diário (não rastreia entre dias). */
 async function recordEvent(
@@ -78,37 +44,9 @@ async function recordEvent(
     .run();
 }
 
-/** Pi autenticado por token próprio; só o hash fica no D1. */
-const edgeAuth: MiddlewareHandler<Env> = async (c, next) => {
-  const token = bearer(c.req.header("authorization"));
-  if (!token) return c.json({ error: "unauthorized" }, 401);
-
-  const device = await c.env.DB.prepare(
-    "SELECT id, venue_id, name FROM devices WHERE token_hash = ? AND revoked_at IS NULL",
-  )
-    .bind(await sha256Hex(token))
-    .first<Device>();
-
-  if (!device) return c.json({ error: "unauthorized" }, 401);
-  c.set("device", device);
-  await next();
-};
-
-/** Temporário até o admin ir pra trás do Cloudflare Access. */
-const adminAuth: MiddlewareHandler<Env> = async (c, next) => {
-  const token = bearer(c.req.header("authorization"));
-  if (!token || !c.env.ADMIN_TOKEN) return c.json({ error: "unauthorized" }, 401);
-
-  const [a, b] = await Promise.all([sha256Hex(token), sha256Hex(c.env.ADMIN_TOKEN)]);
-  const enc = new TextEncoder();
-  if (!crypto.subtle.timingSafeEqual(enc.encode(a), enc.encode(b))) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
-  await next();
-};
-
 app.use("/edge/*", edgeAuth);
 app.use("/admin/*", adminAuth);
+app.route("/admin", admin);
 
 app.get("/api/health", (c) =>
   c.json({
@@ -264,7 +202,7 @@ app.put("/edge/clips/:clipId/content", async (c) => {
   const contentType = c.req.header("content-type") ?? "video/mp4";
 
   const clip = await c.env.DB.prepare(
-    "SELECT id, object_key, status FROM clips WHERE id = ? AND device_id = ?",
+    "SELECT id, court_id, object_key, status FROM clips WHERE id = ? AND device_id = ?",
   )
     .bind(clipId, device.id)
     .first<ClipRow>();
@@ -281,13 +219,16 @@ app.put("/edge/clips/:clipId/content", async (c) => {
 
   const bytes = putResult.size;
 
-  await c.env.DB.prepare(
-    `UPDATE clips
-     SET status = 'ready', content_type = ?, bytes = ?, ready_at = datetime('now')
-     WHERE id = ?`,
-  )
-    .bind(contentType, bytes, clipId)
-    .run();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `UPDATE clips
+       SET status = 'ready', content_type = ?, bytes = ?, ready_at = datetime('now')
+       WHERE id = ?`,
+    ).bind(contentType, bytes, clipId),
+    c.env.DB.prepare(
+      "INSERT INTO clip_events (clip_id, court_id, venue_id, type) VALUES (?, ?, ?, 'created')",
+    ).bind(clipId, clip.court_id, device.venue_id),
+  ]);
 
   return c.json({
     clip_id: clipId,
@@ -322,27 +263,52 @@ app.put("/edge/clips/:clipId/thumbnail", async (c) => {
   return c.json({ ok: true, thumb_url: `/clips/${clipId}/thumb.jpg` });
 });
 
-/** Saúde do Pi a cada ~60s. Payload livre (cpu, ram, temp, câmeras, versão). */
+/**
+ * Saúde do Pi a cada ~60s. O último payload fica em devices.last_payload (o painel lê dali);
+ * histórico em heartbeats só a cada 15 min ou quando algo muda — escrita no D1 é o limite do grátis.
+ */
 app.post("/edge/heartbeat", async (c) => {
   const device = c.get("device");
   const payload = await c.req
     .json<Record<string, unknown>>()
     .catch((): Record<string, unknown> => ({}));
   const agentVersion = typeof payload.agent_version === "string" ? payload.agent_version : null;
+  const json = JSON.stringify(payload).slice(0, 4000);
 
-  await c.env.DB.batch([
+  const prev = await c.env.DB.prepare(
+    `SELECT d.agent_version,
+            (SELECT MAX(created_at) FROM heartbeats h WHERE h.device_id = d.id) AS last_history
+     FROM devices d WHERE d.id = ?`,
+  )
+    .bind(device.id)
+    .first<{ agent_version: string | null; last_history: string | null }>();
+
+  const historyDue =
+    !prev?.last_history ||
+    Date.parse(`${prev.last_history.replace(" ", "T")}Z`) <= Date.now() - HEARTBEAT_HISTORY_MIN * 60_000;
+  const anomaly =
+    payloadIssues(payload).length > 0 || (agentVersion !== null && agentVersion !== prev?.agent_version);
+
+  const stmts = [
     c.env.DB.prepare(
       `UPDATE devices
-       SET last_seen_at = datetime('now'), agent_version = COALESCE(?, agent_version)
+       SET last_seen_at = datetime('now'), last_payload = ?, agent_version = COALESCE(?, agent_version)
        WHERE id = ?`,
-    ).bind(agentVersion, device.id),
-    c.env.DB.prepare("INSERT INTO heartbeats (device_id, payload) VALUES (?, ?)").bind(
-      device.id,
-      JSON.stringify(payload).slice(0, 4000),
-    ),
-  ]);
+    ).bind(json, agentVersion, device.id),
+  ];
+  if (historyDue || anomaly) {
+    stmts.push(
+      c.env.DB.prepare("INSERT INTO heartbeats (device_id, payload) VALUES (?, ?)").bind(device.id, json),
+    );
+  }
+  await c.env.DB.batch(stmts);
 
-  return c.json({ ok: true, device_id: device.id, server_time: new Date().toISOString() });
+  return c.json({
+    ok: true,
+    device_id: device.id,
+    history: historyDue || anomaly,
+    server_time: new Date().toISOString(),
+  });
 });
 
 app.get("/clips/:clipId/thumb.jpg", async (c) => {
@@ -493,69 +459,6 @@ app.get("/courts/:publicKey/clips", async (c) => {
       download_url: `/clips/${clip.id}?download=1`,
     })),
   });
-});
-
-/** Cadastra um Pi e devolve o token UMA vez (só o hash fica salvo). */
-app.post("/admin/devices", async (c) => {
-  type DeviceBody = { venue_id?: string; name?: string; kind?: string };
-  const body = await c.req.json<DeviceBody>().catch((): DeviceBody => ({}));
-  if (!body.venue_id || !body.name) return c.json({ error: "venue_id_and_name_required" }, 400);
-
-  const venue = await c.env.DB.prepare("SELECT id FROM venues WHERE id = ?")
-    .bind(body.venue_id)
-    .first();
-  if (!venue) return c.json({ error: "venue_not_found" }, 404);
-
-  const id = crypto.randomUUID();
-  const rawToken = [...crypto.getRandomValues(new Uint8Array(32))]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  const token = `dev_${rawToken}`;
-
-  await c.env.DB.prepare(
-    "INSERT INTO devices (id, venue_id, kind, name, token_hash) VALUES (?, ?, ?, ?, ?)",
-  )
-    .bind(id, body.venue_id, body.kind ?? "pi", body.name, await sha256Hex(token))
-    .run();
-
-  return c.json({ id, venue_id: body.venue_id, name: body.name, token }, 201);
-});
-
-app.get("/admin/devices", async (c) => {
-  const { results } = await c.env.DB.prepare(
-    `SELECT d.id, d.venue_id, v.name AS venue_name, d.kind, d.name, d.agent_version,
-            d.last_seen_at, d.revoked_at,
-            CASE WHEN d.last_seen_at > datetime('now', '-5 minutes') THEN 1 ELSE 0 END AS online
-     FROM devices d JOIN venues v ON v.id = d.venue_id
-     ORDER BY v.name, d.name`,
-  ).all();
-  return c.json({ devices: results });
-});
-
-app.post("/admin/devices/:id/revoke", async (c) => {
-  const result = await c.env.DB.prepare(
-    "UPDATE devices SET revoked_at = datetime('now') WHERE id = ? AND revoked_at IS NULL",
-  )
-    .bind(c.req.param("id"))
-    .run();
-  if (!result.meta.changes) return c.json({ error: "device_not_found" }, 404);
-  return c.json({ ok: true });
-});
-
-/** Apaga clip (vídeo + miniatura) no R2 + metadados no D1. */
-app.delete("/admin/clips/:clipId", async (c) => {
-  const clipId = c.req.param("clipId");
-
-  const clip = await c.env.DB.prepare("SELECT id, object_key, thumb_key FROM clips WHERE id = ?")
-    .bind(clipId)
-    .first<{ id: string; object_key: string; thumb_key: string | null }>();
-
-  if (!clip) return c.json({ error: "clip_not_found" }, 404);
-
-  await c.env.CLIPS.delete(clip.thumb_key ? [clip.object_key, clip.thumb_key] : [clip.object_key]);
-  await c.env.DB.prepare("DELETE FROM clips WHERE id = ?").bind(clipId).run();
-
-  return c.json({ ok: true, clip_id: clipId, deleted: true });
 });
 
 /** Retenção: apaga clips expirados (R2 + D1), pendentes órfãos e heartbeats antigos. */

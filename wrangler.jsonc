@@ -41,7 +41,9 @@
     ]
   },
   "vars": {
-    "RETENTION_DAYS": "7"
+    "RETENTION_DAYS": "7",
+    // Sem heartbeat há mais que isso = offline (agent manda a cada 60s)
+    "DEVICE_OFFLINE_SEC": "180"
   },
   "triggers": {
     // Pausado até ir pra produção. Reativar: ["17 6 * * *"] (06:17 UTC = 03:17 BRT)
