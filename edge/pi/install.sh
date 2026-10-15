@@ -27,7 +27,7 @@ step() { echo -e "\n==> $*"; }
 
 step "pacotes (ffmpeg, curl, xz)"
 apt-get update -qq
-apt-get install -y -qq ffmpeg curl xz-utils ca-certificates
+apt-get install -y -qq --no-install-recommends ffmpeg curl xz-utils ca-certificates
 
 step "node $NODE_MAJOR"
 if ! command -v node >/dev/null || [[ "$(node -v)" != v${NODE_MAJOR}.* ]]; then
@@ -122,8 +122,13 @@ if ! command -v tailscale >/dev/null; then
 fi
 TS_ARGS=(--ssh)
 [[ -n "$HOSTNAME_ARG" ]] && TS_ARGS+=(--hostname "$HOSTNAME_ARG")
-[[ -n "$TS_AUTHKEY" ]] && TS_ARGS+=(--authkey "$TS_AUTHKEY")
-tailscale up "${TS_ARGS[@]}" || echo "tailscale up falhou — rode manualmente: sudo tailscale up --ssh"
+if [[ -n "$TS_AUTHKEY" ]]; then
+  tailscale up "${TS_ARGS[@]}" --authkey "$TS_AUTHKEY" ||
+    echo "tailscale up falhou — rode manualmente: sudo tailscale up --ssh"
+else
+  # Sem authkey o `tailscale up` espera login no navegador e travaria o script.
+  echo "sem --tailscale-authkey: rode 'sudo tailscale up --ssh' e abra o link de login"
+fi
 
 step "pronto"
 echo "logs:    journalctl -u replay-agent -f"

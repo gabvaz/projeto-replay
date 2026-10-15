@@ -70,7 +70,7 @@ const API_BASE = (
 ).replace(/\/$/, "");
 const COURT_KEY = process.env.COURT_KEY ?? "demo01";
 const EDGE_TOKEN = process.env.EDGE_TOKEN?.trim() || "";
-const AGENT_VERSION = "0.4.0";
+const AGENT_VERSION = "0.4.1";
 /** Câmera instalada deitada → flag de rotação no MP4 (graus horário, sem re-encode). */
 const CAMERA_ROTATION = Number(process.env.CAMERA_ROTATION ?? 0);
 const THUMB_WIDTH = 480;
@@ -396,14 +396,23 @@ function runFfmpeg(args, label) {
 }
 
 async function buildClip(outPath) {
-  const needed = Math.ceil((PRE_ROLL_SEC + POST_ROLL_SEC) / SEGMENT_SEC);
+  const wantSec = PRE_ROLL_SEC + POST_ROLL_SEC;
   const segments = await listSegmentsNewestFirst();
-  if (segments.length < Math.max(3, Math.floor(needed / 2))) {
-    throw new Error(`buffer ainda frio: ${segments.length} segmentos (precisa ~${needed})`);
+
+  // O muxer só corta em keyframe: com GOP da câmera > SEGMENT_SEC cada arquivo dura mais que
+  // SEGMENT_SEC. A duração real de cada um é o intervalo entre o mtime dele e o do anterior.
+  const picked = [];
+  let covered = 0;
+  for (let i = 0; i < segments.length && covered < wantSec; i++) {
+    picked.push(segments[i]);
+    const older = segments[i + 1];
+    covered += older ? (segments[i].mtimeMs - older.mtimeMs) / 1000 : SEGMENT_SEC;
+  }
+  if (picked.length < 3 || covered < wantSec / 2) {
+    throw new Error(`buffer ainda frio: ${covered.toFixed(0)}s de ${wantSec}s`);
   }
 
-  // Ordem cronológica: mais antigo → mais recente entre os N últimos
-  const window = segments.slice(0, needed).reverse();
+  const window = picked.reverse();
   const listPath = `${outPath}.concat.txt`;
   const listBody = window.map((s) => `file '${s.full.replace(/\\/g, "/")}'`).join("\n");
   await writeFile(listPath, listBody, "utf8");
@@ -670,9 +679,12 @@ function startSerial() {
     if (writer && !writer.destroyed) writer.write(`${msg}\n`);
   };
 
+  let lastWhy = "";
   const retry = (why) => {
     if (stopping || retryTimer) return;
-    if (why) log(`botão: ${why} — tentando de novo em 3s`);
+    // Sem ESP32 plugado isso roda a cada 3s; repetir a mesma linha só enche o journal.
+    if (why && why !== lastWhy) log(`botão: ${why} — tentando de novo a cada 3s`);
+    lastWhy = why ?? "";
     reader?.destroy();
     writer?.destroy();
     reader = writer = null;
@@ -721,6 +733,7 @@ function startSerial() {
     reader.on("error", (err) => retry(`leitura: ${err.message}`));
     reader.on("close", () => retry("porta fechou"));
     writer.on("error", (err) => retry(`escrita: ${err.message}`));
+    lastWhy = "";
     log("botão conectado em", BUTTON_SERIAL);
   };
 
