@@ -3,6 +3,7 @@
 // Protocolo por linha:
 //   ESP32 -> Pi: BTN (apertou), HB (vivo, a cada 10s)
 //   Pi -> ESP32: ACK (resposta ao HB), REC (gravando), OK, ERR, BUSY
+//   Debug (notebook): manda "T" + Enter no serial → mesmo efeito do botão
 //
 // Ligação:
 //   botão (NA) entre BUTTON_PIN e GND (usa pull-up interno)
@@ -24,7 +25,8 @@ const unsigned long DEBOUNCE_MS = 50;
 const unsigned long HB_EVERY_MS = 10000;
 const unsigned long REPLY_TIMEOUT_MS = 2000;
 // Pior caso: post-roll + concat + thumb num Pi 3 lento.
-const unsigned long RECORDING_TIMEOUT_MS = 30000;
+// Pi 3 + re-encode story 9:16 pode passar de 30s (post-roll + encode + upload).
+const unsigned long RECORDING_TIMEOUT_MS = 60000;
 const unsigned long FEEDBACK_MS = 1500;
 const unsigned long HOST_TIMEOUT_MS = 3 * HB_EVERY_MS + 2000;
 
@@ -46,6 +48,12 @@ void setState(State next) {
   stateSince = millis();
 }
 
+void triggerPress() {
+  if (state != READY && state != NO_HOST) return;
+  Serial.println("BTN");
+  setState(WAITING_REPLY);
+}
+
 void handleLine(const String &msg) {
   lastHostMsg = millis();
   if (msg == "ACK") {
@@ -58,9 +66,12 @@ void handleLine(const String &msg) {
 void readSerial() {
   while (Serial.available()) {
     char ch = (char)Serial.read();
+    if (ch == '\r') continue;
     if (ch == '\n') {
       line.trim();
-      if (line.length()) handleLine(line);
+      line.toUpperCase();
+      if (line == "T") triggerPress();
+      else if (line.length()) handleLine(line);
       line = "";
     } else if (line.length() < 32) {
       line += ch;
@@ -127,10 +138,7 @@ void loop() {
   readSerial();
 
   // NO_HOST continua aceitando aperto: o Pi pode ter voltado.
-  if (buttonPressed() && (state == READY || state == NO_HOST)) {
-    Serial.println("BTN");
-    setState(WAITING_REPLY);
-  }
+  if (buttonPressed()) triggerPress();
 
   if (millis() - lastHb > HB_EVERY_MS) {
     Serial.println("HB");

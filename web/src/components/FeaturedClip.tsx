@@ -32,6 +32,11 @@ export function FeaturedClip({ clip }: { clip: ClipSummary }) {
           <p className="font-display mt-3 text-6xl leading-none font-black tabular-nums italic sm:text-7xl">
             {clip.time_local}
           </p>
+          {clip.court_name && (
+            <p className="mt-1 text-xs font-bold tracking-wider text-zinc-400 uppercase">
+              {clip.court_name}
+            </p>
+          )}
           <p className="mt-2 text-sm text-zinc-400">Seu lance tá pronto. Assista, baixe e mande pra galera.</p>
         </div>
         <span className="inline-flex items-center justify-center gap-2 self-start rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink shadow-[0_10px_30px_-10px_color-mix(in_oklab,var(--color-lime)_70%,transparent)] transition group-hover:brightness-110">

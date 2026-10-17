@@ -74,9 +74,21 @@ export function VenueDetailPage() {
           </span>
         }
         actions={
-          <Button onClick={() => setEditing(true)}>
-            <Pencil className="size-4" /> Editar
-          </Button>
+          <span className="flex gap-2">
+            {v.public_key && (
+              <a
+                href={`/g/${v.public_key}`}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonCls("subtle")}
+              >
+                <ExternalLink className="size-4" /> Galeria
+              </a>
+            )}
+            <Button onClick={() => setEditing(true)}>
+              <Pencil className="size-4" /> Editar
+            </Button>
+          </span>
         }
       />
 

@@ -4,7 +4,19 @@ export type Court = {
   key: string;
   name: string;
   venue_name: string;
+  venue_key?: string | null;
   brand?: Brand;
+  retention_days: number;
+  today: string;
+};
+
+export type VenueCourt = { key: string; name: string };
+
+export type Venue = {
+  key: string;
+  name: string;
+  brand?: Brand;
+  courts: VenueCourt[];
   retention_days: number;
   today: string;
 };
@@ -18,6 +30,9 @@ export type ClipSummary = {
   thumb_url: string | null;
   play_url: string;
   download_url: string;
+  /** Presente na galeria da arena (/g). */
+  court_key?: string;
+  court_name?: string;
 };
 
 export type ClipDetail = {
@@ -29,6 +44,7 @@ export type ClipDetail = {
   court_key: string;
   court_name: string;
   venue_name: string;
+  venue_key?: string | null;
   brand?: Brand;
   thumb_url: string | null;
   play_url: string;
@@ -50,6 +66,16 @@ export const fetchClips = (key: string, date: string) =>
   getJson<{ date: string; clips: ClipSummary[] }>(
     `/api/courts/${encodeURIComponent(key)}/clips?date=${date}`,
   );
+
+export const fetchVenue = (key: string) => getJson<Venue>(`/api/venues/${encodeURIComponent(key)}`);
+
+export const fetchVenueClips = (key: string, date: string, court?: string | null) => {
+  const q = new URLSearchParams({ date });
+  if (court) q.set("court", court);
+  return getJson<{ date: string; court: string | null; clips: ClipSummary[] }>(
+    `/api/venues/${encodeURIComponent(key)}/clips?${q}`,
+  );
+};
 
 export const fetchClip = (id: string) => getJson<ClipDetail>(`/api/clips/${encodeURIComponent(id)}`);
 
