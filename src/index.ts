@@ -113,7 +113,7 @@ app.get("/api/health", (c) =>
 app.get("/api/courts/:key", async (c) => {
   const court = await c.env.DB.prepare(
     `SELECT co.public_key AS key, co.name, v.id AS venue_id, v.name AS venue_name,
-            v.public_name, v.brand_color, v.logo_key
+            v.public_key AS venue_key, v.public_name, v.brand_color, v.logo_key
      FROM courts co JOIN venues v ON v.id = co.venue_id
      WHERE co.public_key = ?`,
   )
@@ -123,6 +123,7 @@ app.get("/api/courts/:key", async (c) => {
       name: string;
       venue_id: string;
       venue_name: string;
+      venue_key: string | null;
       public_name: string | null;
       brand_color: string | null;
       logo_key: string | null;
@@ -140,9 +141,104 @@ app.get("/api/courts/:key", async (c) => {
     key: court.key,
     name: court.name,
     venue_name: brand.name,
+    venue_key: court.venue_key,
     brand,
     retention_days: retentionDays(c.env),
     today: todayBrt(),
+  });
+});
+
+/** Galeria da arena (todas as quadras). Filtro opcional ?court=demo01 */
+app.get("/api/venues/:key", async (c) => {
+  const venue = await c.env.DB.prepare(
+    `SELECT id, name, public_key AS key, public_name, brand_color, logo_key
+     FROM venues WHERE public_key = ?`,
+  )
+    .bind(c.req.param("key"))
+    .first<{
+      id: string;
+      name: string;
+      key: string;
+      public_name: string | null;
+      brand_color: string | null;
+      logo_key: string | null;
+    }>();
+  if (!venue) return c.json({ error: "venue_not_found" }, 404);
+
+  const { results: courts } = await c.env.DB.prepare(
+    `SELECT public_key AS key, name FROM courts WHERE venue_id = ? ORDER BY name`,
+  )
+    .bind(venue.id)
+    .all<{ key: string; name: string }>();
+
+  const brand = brandOf(venue);
+  return c.json({
+    key: venue.key,
+    name: brand.name,
+    brand,
+    courts,
+    retention_days: retentionDays(c.env),
+    today: todayBrt(),
+  });
+});
+
+app.get("/api/venues/:key/clips", async (c) => {
+  const date = c.req.query("date") ?? todayBrt();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return c.json({ error: "invalid_date" }, 400);
+  const courtFilter = c.req.query("court")?.trim() || null;
+
+  const venue = await c.env.DB.prepare("SELECT id FROM venues WHERE public_key = ?")
+    .bind(c.req.param("key"))
+    .first<{ id: string }>();
+  if (!venue) return c.json({ error: "venue_not_found" }, 404);
+
+  let courtId: string | null = null;
+  if (courtFilter) {
+    const court = await c.env.DB.prepare(
+      "SELECT id FROM courts WHERE public_key = ? AND venue_id = ?",
+    )
+      .bind(courtFilter, venue.id)
+      .first<{ id: string }>();
+    if (!court) return c.json({ error: "court_not_found" }, 404);
+    courtId = court.id;
+  }
+
+  const dayStart = `${date} 00:00:00`;
+  const { results } = await c.env.DB.prepare(
+    `SELECT cl.id, cl.bytes, cl.expires_at, cl.thumb_key,
+            strftime('%H:%M', cl.created_at, '-3 hours') AS time_local,
+            CAST(strftime('%H', cl.created_at, '-3 hours') AS INTEGER) AS hour,
+            co.public_key AS court_key, co.name AS court_name
+     FROM clips cl
+     JOIN courts co ON co.id = cl.court_id
+     WHERE co.venue_id = ? AND cl.status = 'ready' AND cl.expires_at > datetime('now')
+       AND (? IS NULL OR cl.court_id = ?)
+       AND cl.created_at >= datetime(?, '+3 hours')
+       AND cl.created_at < datetime(?, '+1 day', '+3 hours')
+     ORDER BY cl.created_at DESC
+     LIMIT 500`,
+  )
+    .bind(venue.id, courtId, courtId, dayStart, dayStart)
+    .all<{
+      id: string;
+      bytes: number | null;
+      expires_at: string;
+      thumb_key: string | null;
+      time_local: string;
+      hour: number;
+      court_key: string;
+      court_name: string;
+    }>();
+
+  return c.json({
+    date,
+    court: courtFilter,
+    clips: results.map(({ thumb_key, ...clip }) => ({
+      ...clip,
+      thumb_url: thumb_key ? `/clips/${clip.id}/thumb.jpg` : null,
+      play_url: `/clips/${clip.id}`,
+      download_url: `/clips/${clip.id}?download=1`,
+    })),
   });
 });
 
@@ -195,7 +291,7 @@ app.get("/api/clips/:id", async (c) => {
             strftime('%Y-%m-%d', cl.created_at, '-3 hours') AS date_local,
             strftime('%H:%M', cl.created_at, '-3 hours') AS time_local,
             co.public_key AS court_key, co.name AS court_name, v.name AS venue_name,
-            v.id AS venue_id, v.public_name, v.brand_color, v.logo_key
+            v.public_key AS venue_key, v.id AS venue_id, v.public_name, v.brand_color, v.logo_key
      FROM clips cl
      JOIN courts co ON co.id = cl.court_id
      JOIN venues v ON v.id = co.venue_id

@@ -106,6 +106,7 @@ export function CourtPage() {
       <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-10">
         <CourtHero
           venueName={court.data?.venue_name}
+          venueHref={court.data?.venue_key ? `/g/${court.data.venue_key}` : null}
           courtName={court.data?.name}
           brand={court.data?.brand}
           isToday={isToday}

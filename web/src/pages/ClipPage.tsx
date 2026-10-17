@@ -152,7 +152,17 @@ function ClipView({ id }: { id: string }) {
             <>
               <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.18em] text-zinc-400 uppercase">
                 <BrandLogo brand={c.brand} className="size-7" />
-                {c.venue_name} · {c.court_name}
+                {c.venue_key ? (
+                  <Link to={`/g/${c.venue_key}`} viewTransition className="hover:text-lime">
+                    {c.venue_name}
+                  </Link>
+                ) : (
+                  c.venue_name
+                )}{" "}
+                ·{" "}
+                <Link to={`/q/${c.court_key}`} viewTransition className="hover:text-lime">
+                  {c.court_name}
+                </Link>
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 font-semibold">

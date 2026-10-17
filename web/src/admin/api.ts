@@ -67,6 +67,7 @@ export type VenueRow = {
   contact_email: string | null;
   status: VenueStatus;
   notes: string | null;
+  public_key?: string | null;
   created_at: string;
   courts: number;
   devices: number;

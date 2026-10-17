@@ -53,11 +53,18 @@ export function ClipCard({ clip, isToday, delay = 0, className = "", morph = tru
     >
       <ClipThumb clip={clip} transitioning={transitioning} />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
-      {fresh && (
-        <span className="absolute top-2 left-2 rounded-full bg-lime px-2 py-0.5 text-[10px] font-black tracking-wider text-ink uppercase">
-          Novo
-        </span>
-      )}
+      <div className="absolute top-2 left-2 flex flex-col items-start gap-1">
+        {fresh && (
+          <span className="rounded-full bg-lime px-2 py-0.5 text-[10px] font-black tracking-wider text-ink uppercase">
+            Novo
+          </span>
+        )}
+        {clip.court_name && (
+          <span className="max-w-[9rem] truncate rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase backdrop-blur">
+            {clip.court_name}
+          </span>
+        )}
+      </div>
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 p-2 sm:p-3">
         <span className="font-display text-2xl leading-none font-extrabold tabular-nums sm:text-3xl">
           {clip.time_local}

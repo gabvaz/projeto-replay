@@ -10,6 +10,7 @@ import { NotFoundError } from "./api";
 import { ClipPage } from "./pages/ClipPage";
 import { CourtPage } from "./pages/CourtPage";
 import { HomePage } from "./pages/HomePage";
+import { VenuePage } from "./pages/VenuePage";
 import "./index.css";
 
 const QrPage = lazy(() => import("./pages/QrPage").then((m) => ({ default: m.QrPage })));
@@ -36,6 +37,7 @@ const router = createBrowserRouter([
       </Suspense>
     ),
   },
+  { path: "/g/:key", element: <VenuePage /> },
   { path: "/v/:id", element: <ClipPage /> },
   {
     path: "/painel/*",

@@ -29,7 +29,16 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { createReadStream, createWriteStream, existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  openSync,
+  closeSync,
+  writeSync,
+  readdirSync,
+  readFileSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { freemem, homedir, loadavg, totalmem } from "node:os";
@@ -70,9 +79,11 @@ const API_BASE = (
 ).replace(/\/$/, "");
 const COURT_KEY = process.env.COURT_KEY ?? "demo01";
 const EDGE_TOKEN = process.env.EDGE_TOKEN?.trim() || "";
-const AGENT_VERSION = "0.4.1";
+const AGENT_VERSION = "0.4.5";
 /** Câmera instalada deitada → flag de rotação no MP4 (graus horário, sem re-encode). */
 const CAMERA_ROTATION = Number(process.env.CAMERA_ROTATION ?? 0);
+/** "story" = 9:16 real (720x1280). Câmera landscape → crop central; deitada → transpose. */
+const OUTPUT_FORMAT = (process.env.OUTPUT_FORMAT ?? "").trim().toLowerCase();
 const THUMB_WIDTH = 480;
 const HEARTBEAT_SEC = Number(process.env.HEARTBEAT_SEC ?? 60);
 const RTSP_URL = process.env.RTSP_URL?.trim() || "";
@@ -207,6 +218,36 @@ function rotationArgs() {
   if (!CAMERA_ROTATION) return { input: [], output: [] };
   if (FFMPEG_MAJOR >= 6) return { input: ["-display_rotation", String(-CAMERA_ROTATION)], output: [] };
   return { input: [], output: ["-metadata:s:v:0", `rotate=${CAMERA_ROTATION}`] };
+}
+
+/** Args depois do -i no concat. story = re-encode 9:16 (Instagram / UI do app). */
+function clipOutputArgs() {
+  if (OUTPUT_FORMAT === "story") {
+    // transpose se a câmera está fisicamente deitada; senão crop 9:16 no centro do landscape.
+    // 540x960 no Pi 3: ~10s de encode vs ~30s em 720x1280 (timeout do LED do ESP = 30s).
+    let vf = "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,scale=540:960";
+    if (CAMERA_ROTATION === 90) vf = "transpose=1,scale=540:960";
+    else if (CAMERA_ROTATION === 270) vf = "transpose=2,scale=540:960";
+    return [
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-threads",
+      "3",
+      "-crf",
+      "26",
+      "-pix_fmt",
+      "yuv420p",
+      "-an",
+      "-movflags",
+      "+faststart",
+    ];
+  }
+  const rotation = rotationArgs();
+  return ["-c", "copy", ...rotation.output, "-movflags", "+faststart"];
 }
 
 function spawnFfmpeg(args, opts = {}) {
@@ -417,7 +458,7 @@ async function buildClip(outPath) {
   const listBody = window.map((s) => `file '${s.full.replace(/\\/g, "/")}'`).join("\n");
   await writeFile(listPath, listBody, "utf8");
 
-  const rotation = rotationArgs();
+  const rotationIn = OUTPUT_FORMAT === "story" ? [] : rotationArgs().input;
   try {
     await runFfmpeg(
       [
@@ -429,14 +470,10 @@ async function buildClip(outPath) {
         "concat",
         "-safe",
         "0",
-        ...rotation.input,
+        ...rotationIn,
         "-i",
         listPath,
-        "-c",
-        "copy",
-        ...rotation.output,
-        "-movflags",
-        "+faststart",
+        ...clipOutputArgs(),
         outPath,
       ],
       "concat",
@@ -659,9 +696,42 @@ async function replayAndUpload(source) {
 /* ------------------------------------------------------------------ serial */
 
 /**
+ * CH9102/CP210x: ao abrir a tty o kernel ergue DTR e o ESP32 fica em reset.
+ * Herda o fd no python (stdio[3]) e zera DTR/RTS no mesmo file description.
+ */
+function releaseEspReset(fd) {
+  if (typeof fd !== "number" || fd < 0) return;
+  // Pulso RTS (como o esptool): libera o ESP do reset do auto-reset USB.
+  const py = `
+import fcntl, struct, time
+TIOCMGET, TIOCMSET = 0x5415, 0x5418
+DTR, RTS = 2, 4
+fd = 3
+def get():
+    return struct.unpack("I", fcntl.ioctl(fd, TIOCMGET, struct.pack("I", 0)))[0]
+def set(st):
+    fcntl.ioctl(fd, TIOCMSET, struct.pack("I", st))
+st = get()
+set((st | RTS) & ~DTR)   # RTS alto, DTR baixo
+time.sleep(0.1)
+set(st & ~(DTR | RTS))   # os dois baixos → roda
+time.sleep(0.05)
+print(f"modem={hex(get())}", flush=True)
+`;
+  const r = spawnSync("/usr/bin/python3", ["-c", py], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe", fd],
+  });
+  const out = `${r.stdout || ""}${r.stderr || ""}`.trim();
+  if (r.status !== 0) log("botão: falha ao soltar DTR/RTS:", out || `status=${r.status}`);
+  else if (out) log("botão: reset USB", out);
+}
+
+/**
  * ESP32 via USB (Linux). Protocolo por linha:
  *   ESP32 → Pi: BTN (apertou), HB (vivo, a cada 10s)
  *   Pi → ESP32: ACK (resposta ao HB), REC (gravando), OK, ERR, BUSY
+ *   Debug: POST /local/serial-t manda "T" (mesmo efeito do botão no firmware)
  * Sem dependência npm: stty configura a porta e o device é lido como arquivo.
  */
 function startSerial() {
@@ -672,12 +742,19 @@ function startSerial() {
   }
 
   let reader = null;
-  let writer = null;
+  let portFd = -1;
   let retryTimer = null;
 
   const send = (msg) => {
-    if (writer && !writer.destroyed) writer.write(`${msg}\n`);
+    if (portFd < 0) return;
+    try {
+      writeSync(portFd, `${msg}\n`);
+    } catch (err) {
+      log("botão: write falhou:", err.message);
+    }
   };
+  // expõe pro HTTP de debug (só 127.0.0.1)
+  serialSend = send;
 
   let lastWhy = "";
   const retry = (why) => {
@@ -686,8 +763,15 @@ function startSerial() {
     if (why && why !== lastWhy) log(`botão: ${why} — tentando de novo a cada 3s`);
     lastWhy = why ?? "";
     reader?.destroy();
-    writer?.destroy();
-    reader = writer = null;
+    reader = null;
+    if (portFd >= 0) {
+      try {
+        closeSync(portFd);
+      } catch {
+        /* já fechado */
+      }
+      portFd = -1;
+    }
     retryTimer = setTimeout(() => {
       retryTimer = null;
       open();
@@ -702,14 +786,29 @@ function startSerial() {
     });
     if (stty.status !== 0) return retry(`stty falhou: ${stty.stderr?.trim()}`);
 
-    reader = createReadStream(BUTTON_SERIAL, { highWaterMark: 64 });
-    writer = createWriteStream(BUTTON_SERIAL, { flags: "a" });
+    // Um único open: createReadStream+WriteStream na path erguem DTR duas vezes e o ESP fica em reset.
+    try {
+      portFd = openSync(BUTTON_SERIAL, "r+");
+    } catch (err) {
+      return retry(`open: ${err.message}`);
+    }
+    releaseEspReset(portFd);
+
+    reader = createReadStream("", { fd: portFd, highWaterMark: 64, autoClose: false });
     let buf = "";
+    let loggedFirst = false;
+    lastWhy = "";
+    log("botão conectado em", BUTTON_SERIAL);
+
     reader.on("data", (chunk) => {
+      if (!loggedFirst) {
+        loggedFirst = true;
+        log("botão: rx", JSON.stringify(chunk.toString("utf8").slice(0, 80)));
+      }
       buf += chunk.toString("utf8");
       let nl;
       while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim().toUpperCase();
+        const line = buf.slice(0, nl).replace(/\r/g, "").trim().toUpperCase();
         buf = buf.slice(nl + 1);
         if (line === "HB") {
           lastButtonHb = Date.now();
@@ -732,13 +831,13 @@ function startSerial() {
     });
     reader.on("error", (err) => retry(`leitura: ${err.message}`));
     reader.on("close", () => retry("porta fechou"));
-    writer.on("error", (err) => retry(`escrita: ${err.message}`));
-    lastWhy = "";
-    log("botão conectado em", BUTTON_SERIAL);
   };
 
   open();
 }
+
+/** Preenchido por startSerial; null se sem botão. */
+let serialSend = null;
 
 /* --------------------------------------------------------------- heartbeat */
 
@@ -903,6 +1002,18 @@ function startHttp() {
         "content-type": "application/json",
       });
       res.end(JSON.stringify(result));
+      return;
+    }
+    // Debug: manda "T" pro ESP32 (firmware trata como aperto). Testa o caminho serial inteiro.
+    if (req.method === "POST" && url.pathname === "/local/serial-t") {
+      if (!serialSend) {
+        res.writeHead(503, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: false, error: "no_serial" }));
+        return;
+      }
+      serialSend("T");
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true, sent: "T" }));
       return;
     }
     res.writeHead(404, { "content-type": "application/json" });
