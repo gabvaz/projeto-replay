@@ -41,7 +41,7 @@ async function sendMail(env: Bindings, subject: string, text: string): Promise<b
   try {
     await env.EMAIL.send({
       to,
-      from: { email: env.ALERT_EMAIL_FROM, name: "Replay" },
+      from: { email: env.ALERT_EMAIL_FROM, name: "loop" },
       subject,
       text,
     });
@@ -147,8 +147,8 @@ async function notifyPending(env: Bindings): Promise<boolean> {
     ];
     const venues = (rows: AlertRow[]) => [...new Set(rows.map((a) => a.venue_name))].join(", ");
     const subject = openedNow.length
-      ? `[Replay] ${openedNow.length} problema(s): ${venues(openedNow)}`.slice(0, 150)
-      : `[Replay] resolvido: ${venues(closedNow)}`.slice(0, 150);
+      ? `[loop] ${openedNow.length} problema(s): ${venues(openedNow)}`.slice(0, 150)
+      : `[loop] resolvido: ${venues(closedNow)}`.slice(0, 150);
     ok = await sendMail(env, subject, `${parts.join("\n")}\n\nPainel: ${env.APP_URL ?? ""}/painel/dispositivos\n`);
   }
   if (!ok) return false;
@@ -250,7 +250,7 @@ async function dailySummary(env: Bindings): Promise<boolean> {
     `Alertas abertos: ${openCount}`,
   ].join("\n");
   const today = brt(new Date().toISOString().slice(0, 19).replace("T", " ")).slice(0, 5);
-  return sendMail(env, `[Replay] resumo ${today}${openCount ? ` · ${openCount} alerta(s)` : ""}`, text);
+  return sendMail(env, `[loop] resumo ${today}${openCount ? ` · ${openCount} alerta(s)` : ""}`, text);
 }
 
 export async function runDaily(env: Bindings): Promise<Row> {

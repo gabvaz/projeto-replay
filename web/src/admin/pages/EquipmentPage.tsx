@@ -52,7 +52,7 @@ export function EquipmentPage() {
       ) : (
         <>
           <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi label="Instalados" value={num(by("installed").length)} hint={brl(equipmentTotal(by("installed")))} tone="lime" />
+            <Kpi label="Instalados" value={num(by("installed").length)} hint={brl(equipmentTotal(by("installed")))} tone="ready" />
             <Kpi label="Em estoque" value={num(by("stock").length)} hint={brl(equipmentTotal(by("stock")))} />
             <Kpi
               label="Manutenção"

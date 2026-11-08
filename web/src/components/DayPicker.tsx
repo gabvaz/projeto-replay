@@ -44,16 +44,16 @@ export function DayPicker({ today, days, value, onChange }: Props) {
             aria-pressed={active}
             className={`flex w-16 shrink-0 snap-start flex-col items-center rounded-2xl border py-2 transition active:scale-95 ${
               active
-                ? "border-lime bg-lime text-ink shadow-[0_8px_30px_-8px_color-mix(in_oklab,var(--color-lime)_60%,transparent)]"
+                ? "border-lime bg-lime text-white shadow-[0_8px_30px_-8px_color-mix(in_oklab,var(--color-lime)_60%,transparent)]"
                 : "border-line bg-surface text-zinc-300 hover:border-zinc-600"
             }`}
           >
             <span
-              className={`text-[11px] font-semibold tracking-wide uppercase ${active ? "text-ink/70" : "text-zinc-500"}`}
+              className={`font-mono text-[10px] font-medium tracking-wide ${active ? "text-white/70" : "text-zinc-500"}`}
             >
               {topLabel(date, today)}
             </span>
-            <span className="font-display text-2xl leading-none font-extrabold tabular-nums">
+            <span className="font-mono text-2xl leading-none tabular-nums">
               {date.slice(8, 10)}
             </span>
           </button>

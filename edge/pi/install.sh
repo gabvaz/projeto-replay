@@ -58,7 +58,7 @@ step "configuração /etc/replay/edge.env"
 install -d -o root -g replay -m 750 /etc/replay
 if [[ ! -f /etc/replay/edge.env ]]; then
   cat > /etc/replay/edge.env <<'EOF'
-API_BASE=https://projeto-replay.gabrieltenoriovaz-10a.workers.dev
+API_BASE=https://loopreplay.com.br
 COURT_KEY=
 EDGE_TOKEN=
 RTSP_URL=

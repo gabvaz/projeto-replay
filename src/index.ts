@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { admin, payloadIssues } from "./admin";
 import { arena } from "./arena";
-import { adminAuth, arenaAuth, edgeAuth, startArenaSession } from "./auth";
+import { adminAuth, arenaAuth, edgeAuth, ensureBootstrapAdmin } from "./auth";
 import { brandOf } from "./queries";
 import { CRON_ALERTS, runAlerts, runDaily } from "./jobs";
 import {
@@ -64,23 +64,9 @@ app.route("/admin", admin);
 app.use("/portal/*", arenaAuth);
 app.route("/portal", arena);
 
-/** Link do portal enviado pelo admin: vira cookie e some da barra de endereço. */
-app.get("/a/:token", async (c) => {
-  const link = await c.env.DB.prepare(
-    "SELECT id FROM venue_access_links WHERE token_hash = ? AND revoked_at IS NULL",
-  )
-    .bind(await sha256Hex(c.req.param("token")))
-    .first<{ id: string }>();
-  c.header("referrer-policy", "no-referrer");
-  c.header("cache-control", "no-store");
-  if (!link || !c.env.SESSION_SECRET) return c.redirect("/arena/entrar?erro=link", 302);
-
-  await c.env.DB.prepare("UPDATE venue_access_links SET last_used_at = datetime('now') WHERE id = ?")
-    .bind(link.id)
-    .run();
-  await startArenaSession(c, link.id);
-  return c.redirect("/arena", 302);
-});
+/** Links mágicos legados → tela de login email/senha. */
+app.get("/acesso/:token", (c) => c.redirect("/arena/entrar", 302));
+app.get("/a/:token", (c) => c.redirect("/arena/entrar", 302));
 
 app.get("/brand/:venueId/logo", async (c) => {
   const venue = await c.env.DB.prepare("SELECT logo_key FROM venues WHERE id = ?")
@@ -587,7 +573,7 @@ app.get("/clips/:clipId", async (c) => {
 });
 
 /** Página do clip com og:* pra prévia no WhatsApp/Instagram; o resto é o SPA. */
-app.get("/v/:id", async (c) => {
+async function clipOgPage(c: Context<Env>, id: string) {
   const indexRes = await c.env.ASSETS.fetch(new URL("/", c.req.url));
   const clip = await c.env.DB.prepare(
     `SELECT cl.id, cl.thumb_key, co.name AS court_name, COALESCE(v.public_name, v.name) AS venue_name,
@@ -597,7 +583,7 @@ app.get("/v/:id", async (c) => {
      JOIN venues v ON v.id = co.venue_id
      WHERE cl.id = ? AND cl.status = 'ready' AND cl.expires_at > datetime('now')`,
   )
-    .bind(c.req.param("id"))
+    .bind(id)
     .first<{
       id: string;
       thumb_key: string | null;
@@ -608,8 +594,9 @@ app.get("/v/:id", async (c) => {
   if (!clip) return indexRes;
 
   const origin = new URL(c.req.url).origin;
-  const title = `Replay · ${clip.venue_name} · ${clip.court_name} · ${clip.when_local}`;
+  const title = `loop · ${clip.venue_name} · ${clip.court_name} · ${clip.when_local}`;
   const image = clip.thumb_key ? `${origin}/clips/${clip.id}/thumb.jpg` : null;
+  const url = `${origin}/replay/${clip.id}`;
 
   const rewriter = new HTMLRewriter()
     .on("title", {
@@ -624,7 +611,7 @@ app.get("/v/:id", async (c) => {
     })
     .on('meta[property="og:url"]', {
       element(el) {
-        el.setAttribute("content", `${origin}/v/${clip.id}`);
+        el.setAttribute("content", url);
       },
     })
     .on('meta[property="og:image"]', {
@@ -635,9 +622,15 @@ app.get("/v/:id", async (c) => {
     });
 
   return rewriter.transform(indexRes);
-});
+}
 
-app.get("/c/:key", (c) => c.redirect(`/q/${c.req.param("key")}`, 301));
+app.get("/replay/:id", (c) => clipOgPage(c, c.req.param("id")));
+app.get("/v/:id", (c) => clipOgPage(c, c.req.param("id")));
+
+app.get("/c/:key", (c) => c.redirect(`/quadra/${c.req.param("key")}`, 301));
+app.get("/q/:key", (c) => c.redirect(`/quadra/${c.req.param("key")}${new URL(c.req.url).search}`, 301));
+app.get("/q/:key/qr", (c) => c.redirect(`/quadra/${c.req.param("key")}/qr`, 301));
+app.get("/g/:key", (c) => c.redirect(`/galeria/${c.req.param("key")}${new URL(c.req.url).search}`, 301));
 
 /** Mantido p/ compatibilidade; o front usa /api/courts/:key/clips. */
 app.get("/courts/:publicKey/clips", async (c) => {
@@ -670,7 +663,10 @@ app.get("/courts/:publicKey/clips", async (c) => {
 });
 
 export default {
-  fetch: app.fetch,
+  async fetch(request, env, ctx) {
+    await ensureBootstrapAdmin(env);
+    return app.fetch(request, env, ctx);
+  },
   async scheduled(controller, env, ctx) {
     const job = controller.cron === CRON_ALERTS ? "alerts" : "daily";
     ctx.waitUntil(

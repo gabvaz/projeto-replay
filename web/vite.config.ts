@@ -13,7 +13,6 @@ export default defineConfig({
     proxy: {
       "/api": worker,
       "/clips": worker,
-      "/v/": worker,
     },
   },
 });

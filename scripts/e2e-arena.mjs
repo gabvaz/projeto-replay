@@ -1,6 +1,6 @@
 // E2E do portal da arena contra `wrangler dev` (D1/R2 locais).
 // Uso: npx wrangler dev  →  node scripts/e2e-arena.mjs [http://127.0.0.1:8787]
-// ADMIN_TOKEN vem de .dev.vars (padrão local-admin-token). Cria duas arenas com sufixo aleatório.
+// Admin via Bearer ADMIN_TOKEN (.dev.vars). Portal via conta email/senha.
 
 import { execSync } from "node:child_process";
 
@@ -58,12 +58,14 @@ async function setupVenue(label) {
   return { venueId: venue.json.id, courtKey: court.json.public_key, clipId: slot.json.clip_id };
 }
 
-async function enter(venueId) {
-  const link = await A(`/venues/${venueId}/access-link`, { method: "POST", body: {} });
-  const token = link.json.url?.split("/a/")[1];
-  const res = await call(`/a/${token}`);
+async function createAccount(venueId, email) {
+  return A(`/venues/${venueId}/accounts`, { method: "POST", body: { email } });
+}
+
+async function loginPortal(email, password) {
+  const res = await call("/portal/session", { method: "POST", body: { email, password } });
   const cookie = (res.headers.get("set-cookie") ?? "").split(";")[0];
-  return { link, res, cookie, token };
+  return { res, cookie };
 }
 
 /* ------------------------------------------------------------------ setup */
@@ -76,40 +78,64 @@ const b = await setupVenue("B");
 const noAuth = await call("/portal/me");
 check("portal sem sessão → 401", noAuth.status === 401);
 
-const invalid = await call("/a/token-que-nao-existe");
+const legacy = await call("/acesso/token-legado");
 check(
-  "link inválido → /arena/entrar?erro=link",
-  invalid.status === 302 && invalid.headers.get("location")?.endsWith("/arena/entrar?erro=link"),
+  "link mágico legado → /arena/entrar",
+  legacy.status === 302 && legacy.headers.get("location")?.endsWith("/arena/entrar"),
 );
 
-const first = await enter(a.venueId);
-check("admin gera link /a/:token", first.link.status === 201 && /\/a\/[0-9a-f]{48}$/.test(first.link.json.url), first.link.json.url);
+const emailA = `arena-a-${RUN}@loop.local`;
+const created = await createAccount(a.venueId, emailA);
 check(
-  "abrir link → 302 /arena + cookie HttpOnly",
-  first.res.status === 302 &&
-    first.res.headers.get("location")?.endsWith("/arena") &&
+  "admin cria conta arena",
+  created.status === 201 && created.json.email === emailA && typeof created.json.password === "string",
+  created.json.password,
+);
+const passwordA = created.json.password;
+const accountIdA = created.json.id;
+
+const badLogin = await loginPortal(emailA, "senha-errada-xx");
+check("login portal senha errada → 401", badLogin.res.status === 401);
+
+const first = await loginPortal(emailA, passwordA);
+check(
+  "login portal → 200 + cookie HttpOnly",
+  first.res.status === 200 &&
     first.cookie.startsWith("rs_arena=") &&
     /HttpOnly/i.test(first.res.headers.get("set-cookie") ?? ""),
 );
-check("link sem referrer e sem cache", first.res.headers.get("referrer-policy") === "no-referrer");
 
 const detail = await A(`/venues/${a.venueId}`);
-check("detalhe admin mostra acesso com last_used_at", Boolean(detail.json.access?.last_used_at), JSON.stringify(detail.json.access));
+check(
+  "detalhe admin lista conta",
+  Array.isArray(detail.json.accounts) && detail.json.accounts.some((x) => x.id === accountIdA && x.email === emailA),
+  JSON.stringify(detail.json.accounts),
+);
 
 let C = { cookie: first.cookie };
 const P = (path, opts = {}) => call(`/portal${path}`, { ...opts, headers: { ...C, ...opts.headers } });
 
 const me = await P("/me");
-check("GET /portal/me", me.status === 200 && me.json.venue?.id === a.venueId && me.json.brand_colors?.length === 8);
+check(
+  "GET /portal/me",
+  me.status === 200 && me.json.venue?.id === a.venueId && me.json.email === emailA && me.json.brand_colors?.length === 8,
+);
 
 const forged = await call("/portal/me", { headers: { cookie: `${first.cookie.slice(0, -4)}0000` } });
 check("cookie adulterado → 401", forged.status === 401);
 
-const second = await enter(a.venueId);
+const reset = await A(`/venues/${a.venueId}/accounts/${accountIdA}`, {
+  method: "PATCH",
+  body: { password: "" },
+});
+check("admin reseta senha", reset.status === 200 && typeof reset.json.password === "string");
+const passwordA2 = reset.json.password;
+
 const oldSession = await P("/me");
-check("regerar link derruba sessão antiga", oldSession.status === 401);
-const oldLink = await call(`/a/${first.token}`);
-check("link antigo não entra mais", oldLink.headers.get("location")?.endsWith("?erro=link"));
+check("sessão antiga ainda válida após reset (mesmo accountId)", oldSession.status === 200);
+
+const second = await loginPortal(emailA, passwordA2);
+check("login com senha nova", second.res.status === 200);
 C = { cookie: second.cookie };
 
 /* -------------------------------------------------------------- leituras */
@@ -123,7 +149,10 @@ check(
 const devs = await P("/devices");
 check(
   "devices sem token/payload",
-  devs.status === 200 && devs.json.devices?.length === 1 && !("token_hash" in devs.json.devices[0]) && !("last_payload" in devs.json.devices[0]),
+  devs.status === 200 &&
+    devs.json.devices?.length === 1 &&
+    !("token_hash" in devs.json.devices[0]) &&
+    !("last_payload" in devs.json.devices[0]),
 );
 const courts = await P("/courts");
 check("courts da própria arena", courts.json.courts?.length === 1 && courts.json.courts[0].public_key === a.courtKey);
@@ -190,9 +219,12 @@ check(
 const rmLogo = await P("/branding/logo", { method: "DELETE", body: {} });
 const pub2 = await call(`/api/courts/${a.courtKey}`);
 check("remove logo", rmLogo.status === 200 && pub2.json.brand?.logo_url === null);
-const reset = await P("/branding", { method: "PATCH", body: { brand_color: null, public_name: null } });
+const resetBrand = await P("/branding", { method: "PATCH", body: { brand_color: null, public_name: null } });
 const pub3 = await call(`/api/courts/${a.courtKey}`);
-check("reset da marca volta ao nome interno", reset.status === 200 && pub3.json.brand?.color === null && pub3.json.venue_name === `E2E A ${RUN}`);
+check(
+  "reset da marca volta ao nome interno",
+  resetBrand.status === 200 && pub3.json.brand?.color === null && pub3.json.venue_name === `E2E A ${RUN}`,
+);
 
 /* -------------------------------------------------------------- auditoria */
 
@@ -204,8 +236,8 @@ try {
   const rows = JSON.parse(out)[0].results;
   const actions = rows.map((r) => r.action);
   check(
-    "audit_log com link, clip.delete e marca",
-    actions.includes("access_link.create") &&
+    "audit_log com account, clip.delete e marca",
+    actions.includes("account.create") &&
       rows.some((r) => r.action === "clip.delete" && r.actor === `arena:${a.venueId}` && r.target === a.clipId) &&
       actions.includes("branding.logo"),
     actions.join(","),
@@ -219,9 +251,9 @@ try {
 const logout = await P("/session", { method: "DELETE", body: {} });
 check("logout limpa cookie", logout.status === 200 && /rs_arena=;|Max-Age=0/i.test(logout.headers.get("set-cookie") ?? ""));
 
-const revoke = await A(`/venues/${a.venueId}/access-link`, { method: "DELETE", body: {} });
-const afterRevoke = await P("/me");
-check("admin revoga link → sessão 401", revoke.status === 200 && afterRevoke.status === 401);
+const revoke = await A(`/venues/${a.venueId}/accounts/${accountIdA}`, { method: "DELETE", body: {} });
+const afterRevoke = await loginPortal(emailA, passwordA2);
+check("admin desativa conta → login 401", revoke.status === 200 && afterRevoke.res.status === 401);
 
 console.log(failures ? `\n${failures} falha(s)` : "\ntudo ok");
 process.exit(failures ? 1 : 0);

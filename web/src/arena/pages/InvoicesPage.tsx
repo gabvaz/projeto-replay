@@ -6,7 +6,7 @@ import { useMe } from "../ArenaLayout";
 import { get, type ArenaInvoice } from "../api";
 
 function Status({ inv }: { inv: ArenaInvoice }) {
-  if (inv.status === "paid") return <Badge tone="lime">Pago</Badge>;
+  if (inv.status === "paid") return <Badge tone="ready">Pago</Badge>;
   if (inv.status === "void") return <Badge>Cancelada</Badge>;
   if (inv.overdue) return <Badge tone="red">Atrasada</Badge>;
   return <Badge tone="blue">Em aberto</Badge>;
@@ -26,13 +26,13 @@ export function InvoicesPage() {
 
   return (
     <>
-      <PageHeader title="Faturas" subtitle="Mensalidade do sistema de replay" />
+      <PageHeader title="Faturas" subtitle="Mensalidade do loop" />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
         <Kpi
           label="Mensalidade"
           value={contract ? brl(contract.monthly_cents) : "—"}
           hint={contract ? `vence todo dia ${contract.due_day}` : "sem contrato ativo"}
-          tone="lime"
+          tone="ready"
         />
         <Kpi
           label="Em aberto"

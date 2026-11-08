@@ -16,7 +16,7 @@ import {
 import { Badge, Button, Empty, ErrorNote, Field, inputCls, Modal, Table } from "../shared/ui";
 
 export function InvoiceStatus({ inv }: { inv: Invoice }) {
-  if (inv.status === "paid") return <Badge tone="lime">Pago {inv.paid_at ? dateBr(inv.paid_at).slice(0, 5) : ""}</Badge>;
+  if (inv.status === "paid") return <Badge tone="ready">Pago {inv.paid_at ? dateBr(inv.paid_at).slice(0, 5) : ""}</Badge>;
   if (inv.status === "void") return <Badge>Anulada</Badge>;
   if (inv.overdue) return <Badge tone="red">Atrasada</Badge>;
   return <Badge tone="blue">Em aberto</Badge>;
@@ -102,7 +102,7 @@ export function InvoiceTable({ invoices, showVenue = false }: { invoices: Invoic
             <tr key={inv.id}>
               {showVenue && (
                 <td>
-                  <Link to={`/painel/arenas/${inv.venue_id}`} className="font-semibold hover:text-lime">
+                  <Link to={`/painel/arenas/${inv.venue_id}`} className="font-semibold hover:text-white">
                     {inv.venue_name}
                   </Link>
                 </td>

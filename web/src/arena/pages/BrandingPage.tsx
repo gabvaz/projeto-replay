@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ImagePlus, Play, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
-import { LogoIcon } from "../../components/Logo";
+import { Logo, RecDot } from "../../components/Logo";
 import { BrandLogo, BrandScope, type Brand } from "../../shared/brand";
 import { Button, Card, ErrorNote, Field, inputCls, Loading, PageHeader } from "../../shared/ui";
 import { useMe } from "../ArenaLayout";
@@ -14,26 +14,35 @@ function Preview({ brand }: { brand: Brand }) {
   return (
     <BrandScope color={brand.color} className="overflow-hidden rounded-2xl border border-line bg-ink">
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
-        <LogoIcon className="size-5" />
-        <span className="font-display text-sm font-black uppercase italic">Replay</span>
+        <Logo className="h-5" />
       </div>
       <div className="bg-stage px-4 py-5">
         <div className="flex items-center gap-3">
           <BrandLogo brand={brand} className="size-12" />
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold tracking-wide text-lime uppercase">{brand.name}</p>
-            <p className="font-display text-3xl leading-none font-black uppercase italic">Quadra 1</p>
+            <p className="font-mono text-[11px] font-medium tracking-wider text-zinc-400">{brand.name}</p>
+            <p className="font-display text-3xl leading-none">
+              Quadra 1
+              <RecDot />
+            </p>
           </div>
         </div>
         <div className="mt-4 grid grid-cols-3 gap-2">
           {["21:42", "21:37", "21:30"].map((t, i) => (
             <div key={t} className={`relative aspect-[9/12] rounded-lg bg-surface-2 ${i === 0 ? "ring-2 ring-lime" : ""}`}>
-              <span className="absolute bottom-1.5 left-1.5 text-[10px] font-bold">{t}</span>
-              {i === 0 && <Play className="absolute top-1/2 left-1/2 size-5 -translate-1/2 fill-lime text-lime" />}
+              <span className="font-mono absolute bottom-1.5 left-1.5 text-[10px]">{t}</span>
+              {i === 0 && (
+                <>
+                  <span className="font-mono absolute top-1.5 left-1.5 rounded-full bg-rec px-1.5 py-px text-[8px] tracking-wider text-white">
+                    NOVO
+                  </span>
+                  <Play className="absolute top-1/2 left-1/2 size-5 -translate-1/2 fill-white text-white" />
+                </>
+              )}
             </div>
           ))}
         </div>
-        <span className="mt-4 block rounded-full bg-lime py-2 text-center text-xs font-bold text-ink">Baixar meu lance</span>
+        <span className="mt-4 block rounded-full bg-white py-2 text-center text-xs font-bold text-ink">Baixar meu lance</span>
       </div>
     </BrandScope>
   );

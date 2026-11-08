@@ -22,7 +22,7 @@ export function FinancePage() {
 
       {f ? (
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          <Kpi label="MRR" value={brl(f.mrr_cents)} tone="lime" hint={`${f.contracts} contratos ativos`} />
+          <Kpi label="MRR" value={brl(f.mrr_cents)} tone="ready" hint={`${f.contracts} contratos ativos`} />
           <Kpi label="Recebido no mês" value={brl(f.paid_month_cents)} hint={`de ${brl(f.due_month_cents)} faturados`} />
           <Kpi label="A receber" value={brl(f.open_cents)} hint={`${brl(toReceive)} ainda deste mês`} />
           <Kpi

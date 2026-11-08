@@ -13,8 +13,10 @@ import {
   type ClipDetail,
 } from "../api";
 import { AppHeader } from "../components/AppHeader";
+import { RecDot } from "../components/Logo";
 import { ClipCard } from "../components/ClipCard";
 import { ShareButton } from "../components/ShareButton";
+import { paths } from "../routes";
 import { BrandLogo, BrandScope } from "../shared/brand";
 
 type NavState = { thumb?: string | null } | null;
@@ -28,7 +30,7 @@ function Player({ clip, placeholder }: { clip?: ClipDetail; placeholder?: string
   return (
     <div
       style={{ viewTransitionName: "clip-media" }}
-      className="relative mx-auto aspect-[9/16] max-h-[78svh] w-full max-w-[44svh] overflow-hidden rounded-3xl bg-black shadow-[0_30px_80px_-30px_color-mix(in_oklab,var(--color-lime)_35%,transparent)] ring-1 ring-line"
+      className="relative mx-auto aspect-[9/16] max-h-[78svh] w-full max-w-[44svh] overflow-hidden rounded-3xl bg-black shadow-[0_30px_80px_-30px_rgb(0_0_0/0.7)] ring-1 ring-line"
     >
       {clip ? (
         <video
@@ -60,7 +62,7 @@ function Player({ clip, placeholder }: { clip?: ClipDetail; placeholder?: string
           aria-label="Assistir replay"
           className="group absolute inset-0 flex items-center justify-center bg-gradient-to-t from-black/60 via-transparent to-black/20"
         >
-          <span className="flex size-20 items-center justify-center rounded-full bg-lime text-ink shadow-[0_0_0_10px_color-mix(in_oklab,var(--color-lime)_18%,transparent),0_20px_50px_-10px_color-mix(in_oklab,var(--color-lime)_70%,transparent)] transition group-hover:scale-105 group-active:scale-95 group-disabled:opacity-60">
+          <span className="flex size-20 items-center justify-center rounded-full bg-white text-ink shadow-[0_0_0_10px_rgb(255_255_255/0.12),0_20px_50px_-10px_rgb(0_0_0/0.6)] transition group-hover:scale-105 group-active:scale-95 group-disabled:opacity-60">
             <Play className="size-8 translate-x-0.5 fill-current" />
           </span>
         </button>
@@ -81,13 +83,11 @@ function MoreFromCourt({ clip }: { clip: ClipDetail }) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-end justify-between">
-        <h2 className="font-display text-3xl leading-none font-black uppercase italic">
-          Mais da quadra
-        </h2>
+        <h2 className="font-display text-3xl leading-none">Mais da quadra.</h2>
         <Link
-          to={`/q/${clip.court_key}${isToday ? "" : `?d=${clip.date_local}`}`}
+          to={`${paths.court(clip.court_key)}${isToday ? "" : `?d=${clip.date_local}`}`}
           viewTransition
-          className="text-sm font-semibold text-lime hover:underline"
+          className="text-sm font-semibold text-white hover:underline"
         >
           Ver todos
         </Link>
@@ -124,14 +124,15 @@ function ClipView({ id }: { id: string }) {
           <div className="flex size-20 items-center justify-center rounded-full bg-surface ring-1 ring-line">
             <Film className="size-9 text-zinc-600" />
           </div>
-          <h1 className="font-display text-4xl leading-none font-black uppercase italic">
+          <h1 className="font-display text-4xl leading-none">
             Esse replay expirou
+            <RecDot />
           </h1>
           <p className="text-zinc-400">
             Os vídeos ficam disponíveis por 7 dias. Na próxima, baixe ou compartilhe logo depois do
             jogo.
           </p>
-          <Link to="/" className="mt-2 rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink">
+          <Link to="/" className="mt-2 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-ink">
             Ir para o início
           </Link>
         </main>
@@ -143,31 +144,31 @@ function ClipView({ id }: { id: string }) {
 
   return (
     <BrandScope color={c?.brand?.color}>
-      <AppHeader backTo={c ? `/q/${c.court_key}` : undefined} backLabel={c?.court_name} />
+      <AppHeader backTo={c ? paths.court(c.court_key) : undefined} backLabel={c?.court_name} />
       <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pt-1 pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
         <Player clip={c} placeholder={nav?.thumb} />
 
         <div className="animate-rise-in flex flex-col items-center gap-2 text-center">
           {c ? (
             <>
-              <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.18em] text-zinc-400 uppercase">
+              <p className="font-mono flex items-center gap-2 text-[11px] font-medium tracking-wider text-zinc-400">
                 <BrandLogo brand={c.brand} className="size-7" />
                 {c.venue_key ? (
-                  <Link to={`/g/${c.venue_key}`} viewTransition className="hover:text-lime">
+                  <Link to={paths.gallery(c.venue_key)} viewTransition className="hover:text-white">
                     {c.venue_name}
                   </Link>
                 ) : (
                   c.venue_name
                 )}{" "}
                 ·{" "}
-                <Link to={`/q/${c.court_key}`} viewTransition className="hover:text-lime">
+                <Link to={paths.court(c.court_key)} viewTransition className="hover:text-white">
                   {c.court_name}
                 </Link>
               </p>
               <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 font-semibold">
-                  <Clock className="size-3.5 text-lime" />
-                  {shortDate(c.date_local)} às {c.time_local}
+                <span className="font-mono inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 font-medium">
+                  <Clock className="size-3.5 text-rec" />
+                  {shortDate(c.date_local)} · {c.time_local}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-zinc-400">
                   <CalendarClock className="size-3.5" />
@@ -189,7 +190,7 @@ function ClipView({ id }: { id: string }) {
             <a
               href={c.download_url}
               download
-              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-lime px-4 py-3.5 text-base font-bold text-ink shadow-[0_10px_30px_-10px_color-mix(in_oklab,var(--color-lime)_70%,transparent)] transition hover:brightness-110 active:scale-[0.98]"
+              className="flex flex-1 items-center justify-center gap-2 rounded-2xl bg-white px-4 py-3.5 text-base font-bold text-ink transition hover:bg-nevoa active:scale-[0.98]"
             >
               <Download className="size-5" />
               Baixar
@@ -197,7 +198,7 @@ function ClipView({ id }: { id: string }) {
             <ShareButton
               clipId={c.id}
               videoUrl={c.play_url}
-              title={`Replay · ${c.venue_name} · ${c.court_name}`}
+              title={`loop · ${c.venue_name} · ${c.court_name}`}
             />
           </div>
         </div>

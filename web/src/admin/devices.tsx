@@ -17,7 +17,7 @@ function ButtonRate({ d }: { d: DeviceRow }) {
   const rate = Math.round((d.clip_ok_7d / d.press_7d) * 100);
   return (
     <span className="tabular-nums">
-      <span className={rate >= 90 ? "text-lime" : rate >= 70 ? "text-amber-300" : "text-red-300"}>{rate}%</span>
+      <span className={rate >= 90 ? "text-ready" : rate >= 70 ? "text-amber-300" : "text-red-300"}>{rate}%</span>
       <span className="ml-1.5 text-xs text-zinc-500">
         {d.clip_ok_7d}/{d.press_7d}
       </span>
@@ -35,7 +35,7 @@ const EVENT_LABEL: Record<DeviceEventType, string> = {
 };
 
 const EVENT_TONE: Partial<Record<DeviceEventType, string>> = {
-  clip_ok: "text-lime",
+  clip_ok: "text-ready",
   clip_fail: "text-red-300",
   queue_drop: "text-red-300",
   ffmpeg_restart: "text-amber-300",
@@ -135,7 +135,7 @@ export function DeviceTable({ devices, showVenue = false }: { devices: DeviceRow
                 </td>
                 {showVenue && (
                   <td>
-                    <Link to={`/painel/arenas/${d.venue_id}`} className="hover:text-lime">
+                    <Link to={`/painel/arenas/${d.venue_id}`} className="hover:text-white">
                       {d.venue_name}
                     </Link>
                   </td>
@@ -237,7 +237,7 @@ export function CreateDeviceModal({ venueId, open, onClose }: { venueId: string;
             (ou <code className="font-mono">edge/.env</code> no PC).
           </p>
           <div className="flex items-center gap-2 rounded-lg border border-line bg-ink p-2">
-            <code className="min-w-0 flex-1 truncate font-mono text-xs text-lime">{envLine}</code>
+            <code className="min-w-0 flex-1 truncate font-mono text-xs text-white">{envLine}</code>
             <Button
               size="sm"
               onClick={() => {

@@ -19,7 +19,6 @@ import { useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   adminFetch,
-  ago,
   brl,
   dateBr,
   errorText,
@@ -77,7 +76,7 @@ export function VenueDetailPage() {
           <span className="flex gap-2">
             {v.public_key && (
               <a
-                href={`/g/${v.public_key}`}
+                href={`/galeria/${v.public_key}`}
                 target="_blank"
                 rel="noreferrer"
                 className={buttonCls("subtle")}
@@ -147,7 +146,7 @@ function SummaryTab({ d }: { d: VenueDetail }) {
                 <li key={value} className="flex items-center gap-2">
                   <Icon className="size-4 shrink-0 text-zinc-500" />
                   {href ? (
-                    <a href={href} target="_blank" rel="noreferrer" className="truncate hover:text-lime">
+                    <a href={href} target="_blank" rel="noreferrer" className="truncate hover:text-white">
                       {value}
                     </a>
                   ) : (
@@ -163,43 +162,66 @@ function SummaryTab({ d }: { d: VenueDetail }) {
           <p className="mt-4 text-xs text-zinc-600">Cliente desde {dateBr(v.created_at.slice(0, 10))}</p>
         </Card>
       </div>
-      <AccessCard venueId={v.id} venueName={v.name} phone={v.contact_phone} access={d.access} />
+      <AccountsCard venueId={v.id} venueName={v.name} phone={v.contact_phone} accounts={d.accounts} />
     </>
   );
 }
 
-/** Link do portal da arena: o token só existe na resposta do POST, então aparece uma vez. */
-function AccessCard({
+/** Contas email/senha do portal. Senha gerada só aparece uma vez. */
+function AccountsCard({
   venueId,
   venueName,
   phone,
-  access,
+  accounts,
 }: {
   venueId: string;
   venueName: string;
   phone: string | null;
-  access: VenueDetail["access"];
+  accounts: VenueDetail["accounts"];
 }) {
   const qc = useQueryClient();
-  const [url, setUrl] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [revealed, setRevealed] = useState<{ email: string; password: string } | null>(null);
   const [copied, setCopied] = useState(false);
+
   const create = useMutation({
-    mutationFn: () => adminFetch<{ url: string }>(`/venues/${venueId}/access-link`, "POST"),
+    mutationFn: () =>
+      adminFetch<{ id: string; email: string; password: string }>(`/venues/${venueId}/accounts`, "POST", {
+        email: email.trim(),
+      }),
     onSuccess: (r) => {
-      setUrl(r.url);
+      setEmail("");
+      setRevealed({ email: r.email, password: r.password });
       setCopied(false);
       void qc.invalidateQueries({ queryKey: ["venue", venueId] });
     },
   });
-  const revoke = useMutation({
-    mutationFn: () => adminFetch(`/venues/${venueId}/access-link`, "DELETE"),
-    onSuccess: () => {
-      setUrl(null);
+
+  const reset = useMutation({
+    mutationFn: (accountId: string) =>
+      adminFetch<{ email: string; password: string }>(`/venues/${venueId}/accounts/${accountId}`, "PATCH", {
+        password: "",
+      }),
+    onSuccess: (r) => {
+      setRevealed({ email: r.email, password: r.password });
+      setCopied(false);
       void qc.invalidateQueries({ queryKey: ["venue", venueId] });
     },
   });
-  const message = url
-    ? `Oi! Esse é o acesso ao portal da ${venueName} no Replay (estatísticas, clips, cartazes QR e faturas): ${url}`
+
+  const disable = useMutation({
+    mutationFn: (accountId: string) => adminFetch(`/venues/${venueId}/accounts/${accountId}`, "DELETE"),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["venue", venueId] }),
+  });
+
+  const enable = useMutation({
+    mutationFn: (accountId: string) =>
+      adminFetch(`/venues/${venueId}/accounts/${accountId}`, "PATCH", { disabled: false }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["venue", venueId] }),
+  });
+
+  const message = revealed
+    ? `Oi! Acesso ao portal da ${venueName} no loop:\n${window.location.origin}/arena/entrar\nEmail: ${revealed.email}\nSenha: ${revealed.password}`
     : "";
   const waNumber = phone?.replace(/\D/g, "");
 
@@ -207,68 +229,105 @@ function AccessCard({
     <Card
       title={
         <span className="inline-flex items-center gap-2">
-          <KeyRound className="size-4 text-lime" /> Acesso da arena
+          <KeyRound className="size-4 text-white" /> Acesso da arena
         </span>
       }
       className="mt-4"
     >
-      {url ? (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-amber-200">Esse link não aparece de novo. Manda agora pro responsável.</p>
-          <div className="flex items-center gap-2 rounded-lg border border-line bg-ink p-2">
-            <code className="min-w-0 flex-1 truncate font-mono text-xs text-lime">{url}</code>
+      {revealed && (
+        <div className="mb-4 flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+          <p className="text-sm text-amber-200">Senha aparece só agora. Manda pro responsável.</p>
+          <div className="grid gap-1 font-mono text-xs text-white">
+            <span>{revealed.email}</span>
+            <span>{revealed.password}</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               onClick={() => {
-                void navigator.clipboard.writeText(url);
+                void navigator.clipboard.writeText(`${revealed.email}\n${revealed.password}`);
                 setCopied(true);
               }}
             >
               {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
               {copied ? "Copiado" : "Copiar"}
             </Button>
-          </div>
-          <a
-            href={`https://wa.me/${waNumber ? `55${waNumber}` : ""}?text=${encodeURIComponent(message)}`}
-            target="_blank"
-            rel="noreferrer"
-            className={`${buttonCls("primary", "sm")} self-start`}
-          >
-            <MessageCircle className="size-3.5" /> Enviar no WhatsApp
-          </a>
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-zinc-400">
-            {access
-              ? `Link ativo desde ${dateBr(access.created_at.slice(0, 10))} · último acesso ${ago(access.last_used_at)}`
-              : "Nenhum link ativo. A arena ainda não acessa o portal."}
-          </p>
-          <span className="flex gap-2">
-            <Button
-              size="sm"
-              variant="primary"
-              loading={create.isPending}
-              onClick={() =>
-                (!access || confirm("Gerar um link novo derruba o atual (quem estiver logado sai). Continuar?")) &&
-                create.mutate()
-              }
+            <a
+              href={`https://wa.me/${waNumber ? `55${waNumber}` : ""}?text=${encodeURIComponent(message)}`}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonCls("primary", "sm")}
             >
-              {access ? "Gerar novo link" : "Gerar link"}
-            </Button>
-            {access && (
-              <Button
-                size="sm"
-                variant="danger"
-                loading={revoke.isPending}
-                onClick={() => confirm("Revogar o acesso da arena agora?") && revoke.mutate()}
-              >
-                Revogar
-              </Button>
-            )}
-          </span>
+              <MessageCircle className="size-3.5" /> WhatsApp
+            </a>
+          </div>
         </div>
       )}
+
+      {accounts.length === 0 ? (
+        <p className="mb-3 text-sm text-zinc-400">Nenhuma conta. A arena ainda não entra no portal.</p>
+      ) : (
+        <ul className="mb-4 divide-y divide-line">
+          {accounts.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+              <div className="min-w-0">
+                <p className={`truncate text-sm ${a.disabled_at ? "text-zinc-500 line-through" : "text-white"}`}>
+                  {a.email}
+                </p>
+                <p className="text-[11px] text-zinc-600">
+                  {a.disabled_at ? `Desativada ${dateBr(a.disabled_at.slice(0, 10))}` : `Desde ${dateBr(a.created_at.slice(0, 10))}`}
+                </p>
+              </div>
+              <span className="flex gap-1.5">
+                <Button
+                  size="sm"
+                  loading={reset.isPending}
+                  onClick={() => confirm(`Gerar nova senha pra ${a.email}?`) && reset.mutate(a.id)}
+                >
+                  Resetar senha
+                </Button>
+                {a.disabled_at ? (
+                  <Button size="sm" loading={enable.isPending} onClick={() => enable.mutate(a.id)}>
+                    Reativar
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    loading={disable.isPending}
+                    onClick={() => confirm(`Desativar ${a.email}?`) && disable.mutate(a.id)}
+                  >
+                    Desativar
+                  </Button>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (email.trim()) create.mutate();
+        }}
+      >
+        <label className="min-w-[14rem] flex-1">
+          <span className="mb-1 block text-[11px] font-semibold text-zinc-500">Nova conta</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className={inputCls}
+            placeholder="responsavel@arena.com"
+          />
+        </label>
+        <Button type="submit" size="sm" variant="primary" loading={create.isPending} disabled={!email.trim()}>
+          <Plus className="size-3.5" /> Criar
+        </Button>
+      </form>
+      {create.isError && <p className="mt-2 text-sm text-red-400">{errorText(create.error)}</p>}
     </Card>
   );
 }
@@ -352,17 +411,17 @@ function CourtsTab({ venueId, courts }: { venueId: string; courts: CourtRow[] })
             <li key={co.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">
                 <p className="font-semibold">{co.name}</p>
-                <p className="font-mono text-xs text-zinc-500">/q/{co.public_key}</p>
+                <p className="font-mono text-xs text-zinc-500">/quadra/{co.public_key}</p>
               </div>
               <p className="text-xs text-zinc-400 tabular-nums">
                 {num(co.clips_7d)} clips 7d · {num(co.clips_live)} no ar
               </p>
               <span className="flex gap-1">
-                <a href={`/q/${co.public_key}/qr`} target="_blank" rel="noreferrer" className={buttonCls("subtle", "sm")}>
+                <a href={`/quadra/${co.public_key}/qr`} target="_blank" rel="noreferrer" className={buttonCls("subtle", "sm")}>
                   <QrCode className="size-3.5" /> Cartaz
                 </a>
                 <a
-                  href={`/q/${co.public_key}`}
+                  href={`/quadra/${co.public_key}`}
                   target="_blank"
                   rel="noreferrer"
                   aria-label="Abrir galeria"
@@ -426,7 +485,7 @@ function EquipmentTab({ venueId, d }: { venueId: string; d: VenueDetail }) {
     >
       <EquipmentTable items={d.equipment} showVenue={false} />
       <p className="border-t border-line px-4 py-3 text-xs text-zinc-500">
-        Pra ceder algo do estoque, abre em <Link to="/painel/equipamentos" className="text-lime hover:underline">Equipamentos</Link> e
+        Pra ceder algo do estoque, abre em <Link to="/painel/equipamentos" className="text-white hover:underline">Equipamentos</Link> e
         troca a arena.
       </p>
       {creating && <EquipmentModal venueId={venueId} onClose={() => setCreating(false)} />}
@@ -455,7 +514,7 @@ function FinanceTab({ venueId, d }: { venueId: string; d: VenueDetail }) {
           <p className="text-xs font-semibold tracking-wide text-zinc-500 uppercase">Contrato</p>
           {c ? (
             <>
-              <p className="font-display mt-1 text-4xl leading-none font-extrabold text-lime tabular-nums">
+              <p className="font-display mt-1 text-4xl leading-none font-extrabold text-white tabular-nums">
                 {brl(c.monthly_cents)}
                 <span className="text-base text-zinc-500">/mês</span>
               </p>
@@ -526,7 +585,7 @@ function ClipsTab({ venueId }: { venueId: string }) {
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {q.data.clips.map((cl) => (
             <li key={cl.id} className="overflow-hidden rounded-xl border border-line bg-ink">
-              <a href={`/v/${cl.id}`} target="_blank" rel="noreferrer" className="relative block aspect-video bg-surface-2">
+              <a href={`/replay/${cl.id}`} target="_blank" rel="noreferrer" className="relative block aspect-video bg-surface-2">
                 {cl.thumb_url && <img src={cl.thumb_url} alt="" loading="lazy" className="size-full object-cover" />}
                 <span className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
                   {cl.time_local}

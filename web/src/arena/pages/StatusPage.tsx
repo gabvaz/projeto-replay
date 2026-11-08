@@ -19,13 +19,13 @@ export function StatusPage() {
       <PageHeader title="Status" subtitle="Se algo estiver offline, chama a gente que resolvemos" />
       <div
         className={`mb-4 flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm ${
-          offline.length ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-lime/30 bg-lime/10 text-zinc-200"
+          offline.length ? "border-red-500/30 bg-red-500/10 text-red-200" : "border-ready/30 bg-ready/10 text-zinc-200"
         }`}
       >
         {offline.length ? (
           <WifiOff className="size-5 shrink-0 text-red-300" />
         ) : (
-          <CheckCircle2 className="size-5 shrink-0 text-lime" />
+          <CheckCircle2 className="size-5 shrink-0 text-ready" />
         )}
         {offline.length
           ? `${offline.length} equipamento(s) sem conexão agora.`

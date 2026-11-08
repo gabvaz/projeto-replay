@@ -1,17 +1,31 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #07090a;
-  --color-surface: #111416;
-  --color-surface-2: #181c1f;
-  --color-line: #1f2427;
-  --color-lime: #d7ff3a;
-  --color-lime-dim: #a8cc1f;
+  --color-ink: #111214;
+  --color-paper: #f5f3f0;
+  --color-rec: #ff3b2f;
+  --color-grafite: #2a2c30;
+  --color-asfalto: #5a5f66;
+  --color-cimento: #8d9198;
+  --color-linha: #c9ccd1;
+  --color-nevoa: #e6e7e9;
+  --color-ready: #1e9e5a;
+  --color-warn: #f2a900;
+  --color-rec-text: #d42a1f;
 
-  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Barlow Condensed", "Arial Narrow", ui-sans-serif, sans-serif;
+  --color-surface: #191a1d;
+  --color-surface-2: #2a2c30;
+  --color-line: #2a2c30;
 
-  --animate-pulse-dot: pulse-dot 1.6s ease-in-out infinite;
+  /* Acento da arena (BrandScope). Default = REC, só em vivo/novo/chips. */
+  --color-lime: #ff3b2f;
+  --color-lime-dim: #d42a1f;
+
+  --font-sans: "Urbanist Variable", Urbanist, ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Urbanist Variable", Urbanist, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, monospace;
+
+  --animate-pulse-dot: pulse-dot 1.2s ease-in-out infinite;
   --animate-rise-in: rise-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-shimmer: shimmer 1.4s linear infinite;
   --animate-press: press 2.4s ease-in-out infinite;
@@ -24,8 +38,8 @@
       transform: scale(1);
     }
     50% {
-      opacity: 0.35;
-      transform: scale(0.7);
+      opacity: 0.2;
+      transform: scale(0.85);
     }
   }
   @keyframes rise-in {
@@ -81,23 +95,50 @@
   }
   body {
     min-height: 100svh;
+    font-weight: 500;
   }
   ::selection {
-    background: var(--color-lime);
-    color: var(--color-ink);
+    background: var(--color-rec);
+    color: #fff;
   }
 }
 
 @utility font-display {
   font-family: var(--font-display);
-  letter-spacing: -0.01em;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+/*
+  RecDot = ponto da assinatura, em unidades da x-height (os “o” da logo).
+  SVG: o outer h=100; círculo r=17.52 fundo em y=0; gap 13 até a borda do último o.
+*/
+@layer components {
+  .rec-dot {
+    display: inline-block;
+    position: relative;
+    width: 0.3504ex;
+    height: 1ex;
+    margin-left: 0.13ex;
+    vertical-align: baseline;
+  }
+  .rec-dot::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 0.3504ex;
+    height: 0.3504ex;
+    border-radius: 50%;
+    background: var(--color-rec);
+  }
 }
 
 @utility bg-stage {
   background-color: var(--color-ink);
   background-image:
-    radial-gradient(60rem 28rem at 50% -10rem, color-mix(in oklab, var(--color-lime) 13%, transparent), transparent 70%),
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
+    radial-gradient(50rem 24rem at 50% -12rem, color-mix(in oklab, var(--color-rec) 8%, transparent), transparent 70%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.04'/%3E%3C/svg%3E");
   background-repeat: no-repeat, repeat;
 }
 

@@ -11,7 +11,7 @@ const arg = (name, fallback) => {
   return hit ? hit.slice(name.length + 3) : fallback;
 };
 
-const api = arg("api", "https://projeto-replay.gabrieltenoriovaz-10a.workers.dev").replace(/\/$/, "");
+const api = arg("api", "https://loopreplay.com.br").replace(/\/$/, "");
 const venueId = arg("venue");
 const name = arg("name");
 const adminToken = process.env.ADMIN_TOKEN;

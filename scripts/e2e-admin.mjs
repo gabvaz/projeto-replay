@@ -1,9 +1,10 @@
 // E2E do painel contra `wrangler dev` (D1/R2 locais).
 // Uso: npx wrangler dev  →  node scripts/e2e-admin.mjs [http://127.0.0.1:8787]
-// ADMIN_TOKEN vem de .dev.vars (padrão local-admin-token). Cria dados com sufixo aleatório.
+// Login: BOOTSTRAP_ADMIN_* de .dev.vars (seed no 1º request).
 
 const BASE = process.argv[2] ?? process.env.BASE ?? "http://127.0.0.1:8787";
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "local-admin-token";
+const ADMIN_EMAIL = process.env.BOOTSTRAP_ADMIN_EMAIL ?? "admin@loop.local";
+const ADMIN_PASSWORD = process.env.BOOTSTRAP_ADMIN_PASSWORD ?? "local-admin-pass";
 const RUN = Math.random().toString(36).slice(2, 7);
 
 let failures = 0;
@@ -34,20 +35,29 @@ async function call(path, { method = "GET", body, headers = {}, raw } = {}) {
 
 /* ------------------------------------------------------------------ sessão */
 
-const bad = await call("/admin/session", { method: "POST", body: { token: "errado" } });
-check("login com token errado → 401", bad.status === 401);
+const bad = await call("/admin/session", { method: "POST", body: { email: ADMIN_EMAIL, password: "senha-errada-xx" } });
+check("login com senha errada → 401", bad.status === 401);
 
 const noAuth = await call("/admin/overview");
 check("overview sem sessão → 401", noAuth.status === 401);
 
-const login = await call("/admin/session", { method: "POST", body: { token: ADMIN_TOKEN } });
+const login = await call("/admin/session", {
+  method: "POST",
+  body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+});
 const setCookie = login.headers.get("set-cookie") ?? "";
 const cookie = setCookie.split(";")[0];
-check("login → 200 + cookie HttpOnly", login.status === 200 && /HttpOnly/i.test(setCookie) && cookie.startsWith("rs_admin="));
+check(
+  "login email/senha → 200 + cookie HttpOnly",
+  login.status === 200 && /HttpOnly/i.test(setCookie) && cookie.startsWith("rs_admin=") && login.json.email === ADMIN_EMAIL,
+);
 
 const C = { cookie };
 const session = await call("/admin/session", { headers: C });
-check("GET /session com cookie", session.status === 200 && session.json.exp > Date.now() / 1000);
+check(
+  "GET /session com cookie",
+  session.status === 200 && session.json.exp > Date.now() / 1000 && session.json.email === ADMIN_EMAIL,
+);
 
 const csrf = await call("/admin/venues", { method: "POST", headers: { ...C, "content-type": "text/plain" }, raw: "{}" });
 check("mutação com cookie sem JSON → 415", csrf.status === 415);

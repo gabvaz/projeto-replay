@@ -47,6 +47,7 @@ export const get = <T>(path: string) => portalFetch<T>(path);
 
 export type Me = {
   venue: { id: string; name: string; city: string | null; public_name: string | null; brand_color: string | null };
+  email: string;
   brand: Brand;
   brand_colors: string[];
   contract: { monthly_cents: number; due_day: number; start_date: string } | null;

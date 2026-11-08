@@ -7,7 +7,7 @@ import { get, type Court } from "../api";
 
 function ShareButton({ court }: { court: Court }) {
   const [copied, setCopied] = useState(false);
-  const url = `${location.origin}/q/${court.public_key}`;
+  const url = `${location.origin}/quadra/${court.public_key}`;
   return (
     <Button
       size="sm"
@@ -38,7 +38,7 @@ export function CourtsPage() {
         <Loading />
       ) : !q.data.courts.length ? (
         <Card>
-          <Empty>Nenhuma quadra ainda. A equipe Replay cadastra na instalação.</Empty>
+          <Empty>Nenhuma quadra ainda. A gente cadastra na instalação.</Empty>
         </Card>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
@@ -47,7 +47,7 @@ export function CourtsPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-lg font-bold">{co.name}</p>
-                  <p className="font-mono text-xs text-zinc-500">/q/{co.public_key}</p>
+                  <p className="font-mono text-xs text-zinc-500">/quadra/{co.public_key}</p>
                 </div>
                 <p className="text-right text-xs text-zinc-400 tabular-nums">
                   {num(co.clips_7d)} clips em 7d
@@ -56,10 +56,10 @@ export function CourtsPage() {
                 </p>
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
-                <a href={`/q/${co.public_key}/qr`} target="_blank" rel="noreferrer" className={buttonCls("primary", "sm")}>
+                <a href={`/quadra/${co.public_key}/qr`} target="_blank" rel="noreferrer" className={buttonCls("primary", "sm")}>
                   <QrCode className="size-3.5" /> Cartaz QR
                 </a>
-                <a href={`/q/${co.public_key}`} target="_blank" rel="noreferrer" className={buttonCls("subtle", "sm")}>
+                <a href={`/quadra/${co.public_key}`} target="_blank" rel="noreferrer" className={buttonCls("subtle", "sm")}>
                   <ExternalLink className="size-3.5" /> Ver galeria
                 </a>
                 <ShareButton court={co} />

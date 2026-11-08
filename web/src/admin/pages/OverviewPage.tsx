@@ -8,7 +8,7 @@ import { Card, Empty, Kpi, Loading, PageHeader, Table } from "../../shared/ui";
 function AlertItem({ alert }: { alert: Alert }) {
   const base = "flex items-start gap-3 px-4 py-3";
   const venue = (
-    <Link to={`/painel/arenas/${alert.venue_id}`} className="font-semibold text-white hover:text-lime">
+    <Link to={`/painel/arenas/${alert.venue_id}`} className="font-semibold text-white hover:text-white">
       {alert.venue_name}
     </Link>
   );
@@ -66,7 +66,7 @@ export function OverviewPage() {
         <Kpi
           label="Pis online"
           value={`${o.devices.online}/${o.devices.total}`}
-          tone={o.devices.online < o.devices.total ? "red" : "lime"}
+          tone={o.devices.online < o.devices.total ? "red" : "ready"}
           hint={o.devices.total - o.devices.online ? `${o.devices.total - o.devices.online} offline` : "tudo no ar"}
         />
         <Kpi label="Clips hoje" value={num(o.clips.today)} hint={`${num(o.clips.d7)} em 7d · ${num(o.clips.d30)} em 30d`} />
@@ -75,7 +75,7 @@ export function OverviewPage() {
           value={num(o.engagement30.views)}
           hint={`${num(o.engagement30.downloads)} downloads · ${num(o.engagement30.shares)} shares`}
         />
-        <Kpi label="MRR" value={brl(o.finance.mrr_cents)} tone="lime" hint={`${o.finance.contracts} contratos ativos`} />
+        <Kpi label="MRR" value={brl(o.finance.mrr_cents)} tone="ready" hint={`${o.finance.contracts} contratos ativos`} />
         <Kpi
           label="Em atraso"
           value={brl(o.finance.overdue_cents)}
@@ -108,7 +108,7 @@ export function OverviewPage() {
             </ul>
           ) : (
             <div className="flex flex-col items-center gap-2 py-10 text-sm text-zinc-500">
-              <CheckCircle2 className="size-6 text-lime" />
+              <CheckCircle2 className="size-6 text-ready" />
               Nada pegando fogo.
             </div>
           )}
@@ -132,7 +132,7 @@ export function OverviewPage() {
               {o.top_venues.map((v) => (
                 <tr key={v.venue_id}>
                   <td>
-                    <Link to={`/painel/arenas/${v.venue_id}`} className="font-semibold hover:text-lime">
+                    <Link to={`/painel/arenas/${v.venue_id}`} className="font-semibold hover:text-white">
                       {v.venue_name}
                     </Link>
                   </td>

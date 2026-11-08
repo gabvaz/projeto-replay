@@ -50,7 +50,7 @@ export function ClipsPage() {
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             {q.data.clips.map((cl) => (
               <li key={cl.id} className="overflow-hidden rounded-xl border border-line bg-ink">
-                <a href={`/v/${cl.id}`} target="_blank" rel="noreferrer" className="relative block aspect-video bg-surface-2">
+                <a href={`/replay/${cl.id}`} target="_blank" rel="noreferrer" className="relative block aspect-video bg-surface-2">
                   {cl.thumb_url && <img src={cl.thumb_url} alt="" loading="lazy" className="size-full object-cover" />}
                   <span className="absolute top-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 text-xs font-bold tabular-nums">
                     {cl.time_local}

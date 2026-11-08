@@ -12,8 +12,8 @@ import { VenueDetailPage } from "./pages/VenueDetailPage";
 import { VenuesPage } from "./pages/VenuesPage";
 
 function toLogin(err: unknown) {
-  if (err instanceof UnauthorizedError && !location.pathname.startsWith("/painel/login")) {
-    location.assign(`/painel/login?next=${encodeURIComponent(location.pathname + location.search)}`);
+  if (err instanceof UnauthorizedError && !location.pathname.startsWith("/painel/entrar")) {
+    location.assign(`/painel/entrar?next=${encodeURIComponent(location.pathname + location.search)}`);
   }
 }
 
@@ -24,7 +24,7 @@ function useNoIndex() {
     meta.content = "noindex, nofollow";
     document.head.appendChild(meta);
     const prevTitle = document.title;
-    document.title = "Replay · Painel";
+    document.title = "loop · Painel";
     return () => {
       meta.remove();
       document.title = prevTitle;
@@ -53,7 +53,8 @@ export default function AdminApp() {
   return (
     <QueryClientProvider client={client}>
       <Routes>
-        <Route path="login" element={<LoginPage />} />
+        <Route path="entrar" element={<LoginPage />} />
+        <Route path="login" element={<Navigate to="/painel/entrar" replace />} />
         <Route element={<AdminLayout />}>
           <Route index element={<OverviewPage />} />
           <Route path="arenas" element={<VenuesPage />} />

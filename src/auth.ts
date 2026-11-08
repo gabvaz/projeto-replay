@@ -1,9 +1,103 @@
 import type { Context, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { bearer, safeEqual, sha256Hex, toHex, type Bindings, type Device, type Env } from "./lib";
+import { bearer, randomHex, safeEqual, sha256Hex, toHex, type Bindings, type Device, type Env } from "./lib";
 
-const SESSION_COOKIE = "rs_admin";
-const SESSION_TTL_SEC = 8 * 60 * 60;
+const ADMIN_COOKIE = "rs_admin";
+const ARENA_COOKIE = "rs_arena";
+const ADMIN_TTL_SEC = 8 * 60 * 60;
+const ARENA_TTL_SEC = 30 * 24 * 60 * 60;
+const PBKDF2_ITERS = 100_000;
+
+export type Account = {
+  id: string;
+  email: string;
+  password_hash: string;
+  role: "admin" | "arena";
+  venue_id: string | null;
+  disabled_at: string | null;
+};
+
+const encoder = new TextEncoder();
+
+function fromHex(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+async function deriveBits(password: string, salt: Uint8Array, iterations: number): Promise<ArrayBuffer> {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
+  return crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, key, 256);
+}
+
+/** Formato: pbkdf2$iters$saltHex$hashHex */
+export async function hashPassword(password: string): Promise<string> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = await deriveBits(password, salt, PBKDF2_ITERS);
+  return `pbkdf2$${PBKDF2_ITERS}$${toHex(salt)}$${toHex(hash)}`;
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [algo, iterStr, saltHex, hashHex] = stored.split("$");
+  const iterations = Number(iterStr);
+  if (algo !== "pbkdf2" || !saltHex || !hashHex || !Number.isFinite(iterations)) return false;
+  const derived = toHex(await deriveBits(password, fromHex(saltHex), iterations));
+  return safeEqual(derived, hashHex);
+}
+
+export function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function isEmail(v: unknown): v is string {
+  return typeof v === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
+}
+
+/** Senha temporária legível (ex.: a3f9-c2b1-88de). */
+export function generatePassword(): string {
+  const hex = randomHex(6);
+  return `${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}`;
+}
+
+export async function findAccountByEmail(db: D1Database, email: string): Promise<Account | null> {
+  return (
+    (await db
+      .prepare(
+        `SELECT id, email, password_hash, role, venue_id, disabled_at
+         FROM accounts WHERE email = ? COLLATE NOCASE`,
+      )
+      .bind(normalizeEmail(email))
+      .first<Account>()) ?? null
+  );
+}
+
+export async function findAccountById(db: D1Database, id: string): Promise<Account | null> {
+  return (
+    (await db
+      .prepare(
+        `SELECT id, email, password_hash, role, venue_id, disabled_at
+         FROM accounts WHERE id = ?`,
+      )
+      .bind(id)
+      .first<Account>()) ?? null
+  );
+}
+
+/** Cria o primeiro admin se a tabela estiver vazia e BOOTSTRAP_ADMIN_PASSWORD existir. */
+export async function ensureBootstrapAdmin(env: Bindings): Promise<void> {
+  const password = env.BOOTSTRAP_ADMIN_PASSWORD;
+  if (!password) return;
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin'").first<{ n: number }>();
+  if (Number(row?.n ?? 0) > 0) return;
+  const email = normalizeEmail(env.BOOTSTRAP_ADMIN_EMAIL || "admin@loop.local");
+  await env.DB.prepare(
+    `INSERT INTO accounts (id, email, password_hash, role) VALUES (?, ?, ?, 'admin')`,
+  )
+    .bind(`acc_${randomHex(6)}`, email, await hashPassword(password))
+    .run();
+}
+
+/* ---------------------------------------------------------------- edge Pi */
 
 /** Pi autenticado por token próprio; só o hash fica no D1. */
 export const edgeAuth: MiddlewareHandler<Env> = async (c, next) => {
@@ -21,95 +115,46 @@ export const edgeAuth: MiddlewareHandler<Env> = async (c, next) => {
   await next();
 };
 
-/** Chave HMAC derivada do ADMIN_TOKEN: trocar o token derruba todas as sessões. */
-async function sessionKey(env: Bindings): Promise<CryptoKey> {
-  const raw = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(`session|${env.ADMIN_TOKEN}`),
-  );
+/* -------------------------------------------------------------- sessões */
+
+async function hmacKey(env: Bindings, scope: "admin" | "arena"): Promise<CryptoKey> {
+  if (!env.SESSION_SECRET) throw new Error("SESSION_SECRET missing");
+  const raw = await crypto.subtle.digest("SHA-256", encoder.encode(`${scope}|${env.SESSION_SECRET}`));
   return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
 }
 
-async function sign(env: Bindings, value: string): Promise<string> {
-  const sig = await crypto.subtle.sign("HMAC", await sessionKey(env), new TextEncoder().encode(value));
-  return toHex(sig);
+async function sign(env: Bindings, scope: "admin" | "arena", value: string): Promise<string> {
+  return toHex(await crypto.subtle.sign("HMAC", await hmacKey(env, scope), encoder.encode(value)));
 }
 
-export async function checkAdminToken(env: Bindings, token: string): Promise<boolean> {
-  if (!env.ADMIN_TOKEN) return false;
-  const [a, b] = await Promise.all([sha256Hex(token), sha256Hex(env.ADMIN_TOKEN)]);
-  return safeEqual(a, b);
+function parseCookie(value: string | undefined): { id: string; exp: number; sig: string } | null {
+  const [id, expStr, sig] = value?.split(".") ?? [];
+  const exp = Number(expStr);
+  if (!id || !sig || !Number.isFinite(exp)) return null;
+  return { id, exp, sig };
 }
 
-export async function startSession(c: Context<Env>): Promise<number> {
-  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SEC;
-  setCookie(c, SESSION_COOKIE, `${exp}.${await sign(c.env, String(exp))}`, {
+export async function startAdminSession(c: Context<Env>, accountId: string): Promise<number> {
+  const exp = Math.floor(Date.now() / 1000) + ADMIN_TTL_SEC;
+  const payload = `${accountId}.${exp}`;
+  setCookie(c, ADMIN_COOKIE, `${payload}.${await sign(c.env, "admin", payload)}`, {
     httpOnly: true,
     secure: true,
     sameSite: "Strict",
     path: "/",
-    maxAge: SESSION_TTL_SEC,
+    maxAge: ADMIN_TTL_SEC,
   });
   return exp;
 }
 
-export function endSession(c: Context<Env>): void {
-  deleteCookie(c, SESSION_COOKIE, { path: "/", secure: true });
+export function endAdminSession(c: Context<Env>): void {
+  deleteCookie(c, ADMIN_COOKIE, { path: "/", secure: true });
 }
 
-async function sessionExp(c: Context<Env>): Promise<number | null> {
-  const value = getCookie(c, SESSION_COOKIE);
-  const [expStr, sig] = value?.split(".") ?? [];
-  const exp = Number(expStr);
-  if (!sig || !Number.isFinite(exp) || exp * 1000 < Date.now() || !c.env.ADMIN_TOKEN) return null;
-  return safeEqual(sig, await sign(c.env, expStr)) ? exp : null;
-}
-
-/**
- * Bearer ADMIN_TOKEN (scripts) ou cookie de sessão (painel).
- * Mutação via cookie exige JSON: form cross-site não consegue mandar sem preflight.
- */
-export const adminAuth: MiddlewareHandler<Env> = async (c, next) => {
-  if (c.req.path === "/admin/session" && c.req.method === "POST") return next();
-
-  const token = bearer(c.req.header("authorization"));
-  if (token) {
-    if (!(await checkAdminToken(c.env, token))) return c.json({ error: "unauthorized" }, 401);
-    return next();
-  }
-
-  const exp = await sessionExp(c);
-  if (!exp) return c.json({ error: "unauthorized" }, 401);
-  const mutating = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
-  if (mutating && !c.req.header("content-type")?.includes("application/json")) {
-    return c.json({ error: "json_required" }, 415);
-  }
-  c.set("sessionExp", exp);
-  await next();
-};
-
-/* ------------------------------------------------------- portal da arena */
-
-const ARENA_COOKIE = "rs_arena";
-const ARENA_TTL_SEC = 30 * 24 * 60 * 60;
-
-async function arenaKey(env: Bindings): Promise<CryptoKey> {
-  const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`arena|${env.SESSION_SECRET}`));
-  return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-}
-
-async function arenaSign(env: Bindings, value: string): Promise<string> {
-  return toHex(await crypto.subtle.sign("HMAC", await arenaKey(env), new TextEncoder().encode(value)));
-}
-
-/**
- * Troca o token do link por sessão. Lax: o link chega por WhatsApp (navegação cross-site);
- * as mutações continuam protegidas pela exigência de JSON.
- */
-export async function startArenaSession(c: Context<Env>, linkId: string): Promise<void> {
+export async function startArenaSession(c: Context<Env>, accountId: string): Promise<void> {
   const exp = Math.floor(Date.now() / 1000) + ARENA_TTL_SEC;
-  const value = `${linkId}.${exp}`;
-  setCookie(c, ARENA_COOKIE, `${value}.${await arenaSign(c.env, value)}`, {
+  const payload = `${accountId}.${exp}`;
+  setCookie(c, ARENA_COOKIE, `${payload}.${await sign(c.env, "arena", payload)}`, {
     httpOnly: true,
     secure: true,
     sameSite: "Lax",
@@ -122,22 +167,53 @@ export function endArenaSession(c: Context<Env>): void {
   deleteCookie(c, ARENA_COOKIE, { path: "/", secure: true });
 }
 
-/** Cookie válido + link ainda ativo (revogar derruba a sessão na hora). */
+/** Bearer ADMIN_TOKEN (scripts legados) ou cookie de conta admin. */
+export const adminAuth: MiddlewareHandler<Env> = async (c, next) => {
+  if (c.req.path === "/admin/session" && c.req.method === "POST") return next();
+
+  const token = bearer(c.req.header("authorization"));
+  if (token) {
+    if (!c.env.ADMIN_TOKEN) return c.json({ error: "unauthorized" }, 401);
+    const [a, b] = await Promise.all([sha256Hex(token), sha256Hex(c.env.ADMIN_TOKEN)]);
+    if (!safeEqual(a, b)) return c.json({ error: "unauthorized" }, 401);
+    return next();
+  }
+
+  if (!c.env.SESSION_SECRET) return c.json({ error: "unauthorized" }, 401);
+  const parsed = parseCookie(getCookie(c, ADMIN_COOKIE));
+  if (!parsed || parsed.exp * 1000 < Date.now()) return c.json({ error: "unauthorized" }, 401);
+  if (!safeEqual(parsed.sig, await sign(c.env, "admin", `${parsed.id}.${parsed.exp}`))) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  const account = await findAccountById(c.env.DB, parsed.id);
+  if (!account || account.role !== "admin" || account.disabled_at) {
+    endAdminSession(c);
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  const mutating = !["GET", "HEAD", "OPTIONS"].includes(c.req.method);
+  if (mutating && !c.req.header("content-type")?.includes("application/json")) {
+    return c.json({ error: "json_required" }, 415);
+  }
+  c.set("sessionExp", parsed.exp);
+  c.set("accountId", account.id);
+  c.set("accountEmail", account.email);
+  await next();
+};
+
 export const arenaAuth: MiddlewareHandler<Env> = async (c, next) => {
-  const [linkId, expStr, sig] = getCookie(c, ARENA_COOKIE)?.split(".") ?? [];
-  const exp = Number(expStr);
-  if (!sig || !c.env.SESSION_SECRET || !Number.isFinite(exp) || exp * 1000 < Date.now()) {
+  if (c.req.path === "/portal/session" && c.req.method === "POST") return next();
+
+  if (!c.env.SESSION_SECRET) return c.json({ error: "unauthorized" }, 401);
+  const parsed = parseCookie(getCookie(c, ARENA_COOKIE));
+  if (!parsed || parsed.exp * 1000 < Date.now()) return c.json({ error: "unauthorized" }, 401);
+  if (!safeEqual(parsed.sig, await sign(c.env, "arena", `${parsed.id}.${parsed.exp}`))) {
     return c.json({ error: "unauthorized" }, 401);
   }
-  if (!safeEqual(sig, await arenaSign(c.env, `${linkId}.${expStr}`))) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
-  const link = await c.env.DB.prepare(
-    "SELECT venue_id FROM venue_access_links WHERE id = ? AND revoked_at IS NULL",
-  )
-    .bind(linkId)
-    .first<{ venue_id: string }>();
-  if (!link) {
+
+  const account = await findAccountById(c.env.DB, parsed.id);
+  if (!account || account.role !== "arena" || !account.venue_id || account.disabled_at) {
     endArenaSession(c);
     return c.json({ error: "unauthorized" }, 401);
   }
@@ -147,6 +223,8 @@ export const arenaAuth: MiddlewareHandler<Env> = async (c, next) => {
   if (mutating && !ct.includes("application/json") && c.req.header("x-requested-with") !== "replay") {
     return c.json({ error: "json_required" }, 415);
   }
-  c.set("venueId", link.venue_id);
+  c.set("venueId", account.venue_id);
+  c.set("accountId", account.id);
+  c.set("accountEmail", account.email);
   await next();
 };

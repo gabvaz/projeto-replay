@@ -9,9 +9,10 @@ import { DayPicker } from "../components/DayPicker";
 import { EmptyState } from "../components/EmptyState";
 import { FeaturedClip } from "../components/FeaturedClip";
 import { HourGroup } from "../components/HourGroup";
-import { Logo } from "../components/Logo";
+import { Logo, RecDot } from "../components/Logo";
 import { GallerySkeleton } from "../components/Skeletons";
 import { Toast } from "../components/Toast";
+import { paths } from "../routes";
 import { BrandScope } from "../shared/brand";
 
 const POLL_MS = 15_000;
@@ -41,7 +42,7 @@ function useNewClipToast(clips: ClipSummary[] | undefined, date: string | undefi
     if (!prev || prev.date !== date) return;
     const fresh = clips.filter((c) => !prev.ids.has(c.id)).length;
     if (fresh === 0) return;
-    setMessage(fresh === 1 ? "Novo replay chegou!" : `${fresh} replays novos!`);
+    setMessage(fresh === 1 ? "Seu lance ficou salvo." : `Mais ${fresh} lances estão prontos.`);
     const t = setTimeout(() => setMessage(null), TOAST_MS);
     return () => clearTimeout(t);
   }, [clips, date]);
@@ -64,9 +65,9 @@ function CourtFilter({
       <button
         type="button"
         onClick={() => onChange(null)}
-        className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tracking-wide uppercase transition ${
+        className={`font-mono shrink-0 rounded-full px-3.5 py-1.5 text-[11px] font-medium tracking-wide transition ${
           !value
-            ? "bg-lime text-ink"
+            ? "bg-lime text-white"
             : "border border-line bg-surface text-zinc-300 hover:border-lime/40"
         }`}
       >
@@ -77,9 +78,9 @@ function CourtFilter({
           key={co.key}
           type="button"
           onClick={() => onChange(co.key)}
-          className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-bold tracking-wide uppercase transition ${
+          className={`font-mono shrink-0 rounded-full px-3.5 py-1.5 text-[11px] font-medium tracking-wide transition ${
             value === co.key
-              ? "bg-lime text-ink"
+              ? "bg-lime text-white"
               : "border border-line bg-surface text-zinc-300 hover:border-lime/40"
           }`}
         >
@@ -128,13 +129,14 @@ export function VenuePage() {
         <AppHeader />
         <main className="animate-rise-in mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-20 text-center">
           <SearchX className="size-12 text-zinc-600" />
-          <h1 className="font-display text-4xl leading-none font-black uppercase italic">
+          <h1 className="font-display text-4xl leading-none">
             Arena não encontrada
+            <RecDot />
           </h1>
           <p className="text-zinc-400">
             Confira o código <span className="font-mono text-zinc-200">{key}</span>.
           </p>
-          <Link to="/" className="mt-2 rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink">
+          <Link to="/" className="mt-2 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-ink">
             Voltar ao início
           </Link>
         </main>
@@ -167,7 +169,7 @@ export function VenuePage() {
                 : "Todas as quadras"
               : undefined
           }
-          venueHref={selectedCourt ? `/g/${key}` : null}
+          venueHref={selectedCourt ? paths.gallery(key) : null}
           courtName={selectedCourt?.name ?? venue.data?.name}
           brand={venue.data?.brand}
           isToday={isToday}

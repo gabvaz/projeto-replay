@@ -7,7 +7,7 @@ export function HourGroup({ hour, clips, isToday }: Props) {
   return (
     <section>
       <h2 className="sticky top-[calc(3.5rem+env(safe-area-inset-top))] z-20 -mx-4 mb-3 flex items-center gap-3 bg-ink/85 px-4 py-2 backdrop-blur-md">
-        <span className="font-display text-3xl leading-none font-black italic">
+        <span className="font-mono text-3xl leading-none">
           {String(hour).padStart(2, "0")}h
         </span>
         <span className="h-px flex-1 bg-line" />

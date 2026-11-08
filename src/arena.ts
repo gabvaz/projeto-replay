@@ -1,5 +1,11 @@
 import { Hono } from "hono";
-import { endArenaSession } from "./auth";
+import {
+  endArenaSession,
+  findAccountByEmail,
+  isEmail,
+  startArenaSession,
+  verifyPassword,
+} from "./auth";
 import { randomHex, todayBrt, type Env } from "./lib";
 import {
   activeContractStmt,
@@ -37,6 +43,29 @@ const LOGO_TYPES: Record<string, (b: Uint8Array) => boolean> = {
 
 const actor = (venueId: string) => `arena:${venueId}`;
 
+arena.post("/session", async (c) => {
+  if (!c.req.header("content-type")?.includes("application/json")) {
+    return c.json({ error: "json_required" }, 415);
+  }
+  if (!c.env.SESSION_SECRET) return c.json({ error: "unauthorized" }, 401);
+  const body = await readBody<{ email?: string; password?: string }>(c);
+  if (!isEmail(body.email) || typeof body.password !== "string" || body.password.length < 8) {
+    return c.json({ error: "invalid_credentials" }, 401);
+  }
+  const account = await findAccountByEmail(c.env.DB, body.email);
+  if (
+    !account ||
+    account.role !== "arena" ||
+    !account.venue_id ||
+    account.disabled_at ||
+    !(await verifyPassword(body.password, account.password_hash))
+  ) {
+    return c.json({ error: "invalid_credentials" }, 401);
+  }
+  await startArenaSession(c, account.id);
+  return c.json({ ok: true, email: account.email, venue_id: account.venue_id });
+});
+
 arena.get("/me", async (c) => {
   const venueId = c.get("venueId");
   const db = c.env.DB;
@@ -61,6 +90,7 @@ arena.get("/me", async (c) => {
   const { logo_key: _logo, ...rest } = v;
   return c.json({
     venue: rest,
+    email: c.get("accountEmail"),
     brand: brandOf(v),
     brand_colors: BRAND_COLORS,
     contract: ct ? { monthly_cents: ct.monthly_cents, due_day: ct.due_day, start_date: ct.start_date } : null,

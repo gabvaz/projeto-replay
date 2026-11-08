@@ -44,7 +44,7 @@ export function ArenaLayout() {
   const logout = useLogout();
 
   useEffect(() => {
-    if (me.data) document.title = `${me.data.brand.name} · Replay`;
+    if (me.data) document.title = `${me.data.brand.name} · loop`;
   }, [me.data]);
 
   if (!me.data) {
@@ -74,7 +74,7 @@ export function ArenaLayout() {
               end={"end" in rest}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-semibold transition ${
-                  isActive ? "bg-lime text-ink" : "text-zinc-400 hover:bg-white/5 hover:text-white"
+                  isActive ? "bg-white text-ink" : "text-zinc-400 hover:bg-white/5 hover:text-white"
                 }`
               }
             >
@@ -85,7 +85,7 @@ export function ArenaLayout() {
         </nav>
         <div className="mt-auto flex flex-col gap-3">
           <p className="flex items-center gap-1.5 px-3 text-[11px] text-zinc-600">
-            <LogoIcon className="size-4" /> Replay
+            <LogoIcon className="size-4" />
           </p>
           <button
             type="button"
@@ -128,7 +128,7 @@ export function ArenaLayout() {
             to={to}
             end={"end" in rest}
             className={({ isActive }) =>
-              `flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold ${isActive ? "text-lime" : "text-zinc-500"}`
+              `flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold ${isActive ? "text-white" : "text-zinc-500"}`
             }
           >
             <Icon className="size-5" />
@@ -138,7 +138,7 @@ export function ArenaLayout() {
         <NavLink
           to="/arena/mais"
           className={({ isActive }) =>
-            `flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold ${isActive ? "text-lime" : "text-zinc-500"}`
+            `flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold ${isActive ? "text-white" : "text-zinc-500"}`
           }
         >
           <Menu className="size-5" />

@@ -18,7 +18,7 @@ type State = "idle" | "loading" | "tap-again" | "copied";
 export function ShareButton({ clipId, videoUrl, title }: Props) {
   const [state, setState] = useState<State>("idle");
   const fileRef = useRef<File | null>(null);
-  const pageUrl = `${location.origin}/v/${clipId}`;
+  const pageUrl = `${location.origin}/replay/${clipId}`;
 
   async function shareFile(file: File): Promise<boolean> {
     if (typeof navigator.canShare !== "function" || !navigator.canShare({ files: [file] })) {
@@ -86,7 +86,7 @@ export function ShareButton({ clipId, videoUrl, title }: Props) {
       disabled={state === "loading"}
       className={`flex flex-1 items-center justify-center gap-2 rounded-2xl px-4 py-3.5 text-base font-bold transition active:scale-[0.98] disabled:opacity-70 ${
         state === "tap-again"
-          ? "animate-pulse bg-lime text-ink"
+          ? "animate-pulse bg-white text-ink"
           : "border border-line bg-surface-2 text-white hover:border-zinc-600"
       }`}
     >

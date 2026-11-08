@@ -37,8 +37,8 @@ export function AppHeader({ backTo, backLabel }: Props) {
             <span className="truncate">{backLabel ?? "Voltar"}</span>
           </Link>
         ) : (
-          <Link to="/" aria-label="Replay — início">
-            <Logo />
+          <Link to="/" aria-label="loop — início">
+            <Logo className="h-8" />
           </Link>
         )}
         <div data-slot="sponsor" className="h-9 w-24 shrink-0" aria-hidden />

@@ -18,7 +18,7 @@ export function MorePage() {
         {ITEMS.map(({ to, label, hint, icon: Icon }) => (
           <li key={to} className="border-b border-line last:border-0">
             <Link to={to} className="flex items-center gap-3 px-4 py-3.5 hover:bg-white/[0.02]">
-              <Icon className="size-5 text-lime" />
+              <Icon className="size-5 text-white" />
               <span className="flex-1">
                 <span className="block font-semibold">{label}</span>
                 <span className="text-xs text-zinc-500">{hint}</span>

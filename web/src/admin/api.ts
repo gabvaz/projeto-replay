@@ -192,7 +192,14 @@ export type VenueDetail = {
   invoices: Invoice[];
   totals30: Record<string, number>;
   series: DayPoint[];
-  access: { created_at: string; last_used_at: string | null } | null;
+  accounts: VenueAccount[];
+};
+
+export type VenueAccount = {
+  id: string;
+  email: string;
+  created_at: string;
+  disabled_at: string | null;
 };
 
 export type AdminClip = {
@@ -251,7 +258,10 @@ export const EQUIPMENT_STATUS_LABEL: Record<EquipmentStatus, string> = {
 };
 
 export const ERROR_LABEL: Record<string, string> = {
-  invalid_token: "Token inválido",
+  invalid_credentials: "Email ou senha inválidos",
+  invalid_email: "Email inválido",
+  email_taken: "Esse email já está em uso",
+  account_not_found: "Conta não encontrada",
   name_required: "Nome obrigatório",
   public_key_taken: "Esse código de quadra já existe",
   invalid_public_key: "Código inválido (3–32: a-z, 0-9, -)",

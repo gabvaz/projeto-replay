@@ -1,0 +1,11 @@
+loop · arquivos da marca (v1.0)
+
+assinatura/  Assinatura "loop." em 5 versões de cor, já com a área de proteção (altura x) em volta.
+             positiva (fundo claro) · negativa (fundo escuro) · sobre-vermelho · mono-preta · mono-branca
+simbolo/     Símbolo "l" + ponto, nas mesmas versões.
+icone-app/   Ícone do app. loop-icone-1024.png e loop-icone-180.png são quadrados (iOS aplica os cantos);
+             os demais já têm os cantos arredondados (27% do lado).
+
+Cores: Preto Tela #111214 · Papel #F5F3F0 · Branco #FFFFFF · Vermelho REC #FF3B2F
+Fontes: Urbanist e DM Mono (Google Fonts).
+Use sempre estes arquivos; nunca redigite a assinatura com uma fonte.

@@ -1,5 +1,14 @@
 import { Hono } from "hono";
-import { checkAdminToken, endSession, startSession } from "./auth";
+import {
+  endAdminSession,
+  findAccountByEmail,
+  generatePassword,
+  hashPassword,
+  isEmail,
+  normalizeEmail,
+  startAdminSession,
+  verifyPassword,
+} from "./auth";
 import {
   activeContractStmt,
   audit,
@@ -49,18 +58,30 @@ admin.post("/session", async (c) => {
   if (!c.req.header("content-type")?.includes("application/json")) {
     return c.json({ error: "json_required" }, 415);
   }
-  const body = await readBody<{ token: string }>(c);
-  if (typeof body.token !== "string" || !(await checkAdminToken(c.env, body.token))) {
-    return c.json({ error: "invalid_token" }, 401);
+  if (!c.env.SESSION_SECRET) return c.json({ error: "unauthorized" }, 401);
+  const body = await readBody<{ email?: string; password?: string }>(c);
+  if (!isEmail(body.email) || typeof body.password !== "string" || body.password.length < 8) {
+    return c.json({ error: "invalid_credentials" }, 401);
   }
-  const exp = await startSession(c);
-  return c.json({ ok: true, exp });
+  const account = await findAccountByEmail(c.env.DB, body.email);
+  if (
+    !account ||
+    account.role !== "admin" ||
+    account.disabled_at ||
+    !(await verifyPassword(body.password, account.password_hash))
+  ) {
+    return c.json({ error: "invalid_credentials" }, 401);
+  }
+  const exp = await startAdminSession(c, account.id);
+  return c.json({ ok: true, exp, email: account.email });
 });
 
-admin.get("/session", (c) => c.json({ ok: true, exp: c.get("sessionExp") ?? null }));
+admin.get("/session", (c) =>
+  c.json({ ok: true, exp: c.get("sessionExp") ?? null, email: c.get("accountEmail") ?? null }),
+);
 
 admin.delete("/session", (c) => {
-  endSession(c);
+  endAdminSession(c);
   return c.json({ ok: true });
 });
 
@@ -287,7 +308,7 @@ admin.get("/venues/:id", async (c) => {
   const venue = await db.prepare("SELECT * FROM venues WHERE id = ?").bind(id).first();
   if (!venue) return c.json({ error: "venue_not_found" }, 404);
 
-  const [courts, devices, equipment, contract, invoices, totals, series, access] = await db.batch([
+  const [courts, devices, equipment, contract, invoices, totals, series, accounts] = await db.batch([
     courtsStmt(db, id),
     devicesStmt(db, c.env, id),
     db
@@ -303,8 +324,8 @@ admin.get("/venues/:id", async (c) => {
     seriesStmt(db, id),
     db
       .prepare(
-        `SELECT created_at, last_used_at FROM venue_access_links
-         WHERE venue_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1`,
+        `SELECT id, email, created_at, disabled_at FROM accounts
+         WHERE venue_id = ? AND role = 'arena' ORDER BY created_at`,
       )
       .bind(id),
   ]);
@@ -318,43 +339,91 @@ admin.get("/venues/:id", async (c) => {
     invoices: (invoices.results as Row[]).map(withInvoiceStatus),
     totals30: byType(totals.results as Row[]),
     series: series.results,
-    access: access.results[0] ?? null,
+    accounts: accounts.results,
   });
 });
 
-/* --------------------------------------------------- acesso da arena */
+/* ----------------------------------------------- contas do portal arena */
 
-/** Gera link do portal (revoga o anterior). O token só aparece nesta resposta. */
-admin.post("/venues/:id/access-link", async (c) => {
+admin.post("/venues/:id/accounts", async (c) => {
   const venueId = c.req.param("id");
   const venue = await c.env.DB.prepare("SELECT 1 FROM venues WHERE id = ?").bind(venueId).first();
   if (!venue) return c.json({ error: "venue_not_found" }, 404);
 
-  const id = `al_${randomHex(6)}`;
-  const token = randomHex(24);
+  const body = await readBody<{ email?: string; password?: string }>(c);
+  if (!isEmail(body.email)) return c.json({ error: "invalid_email" }, 400);
+  const email = normalizeEmail(body.email);
+  const password =
+    typeof body.password === "string" && body.password.length >= 8 ? body.password : generatePassword();
+
+  const existing = await findAccountByEmail(c.env.DB, email);
+  if (existing) return c.json({ error: "email_taken" }, 409);
+
+  const id = `acc_${randomHex(6)}`;
   await c.env.DB.batch([
     c.env.DB.prepare(
-      "UPDATE venue_access_links SET revoked_at = datetime('now') WHERE venue_id = ? AND revoked_at IS NULL",
-    ).bind(venueId),
-    c.env.DB.prepare("INSERT INTO venue_access_links (id, venue_id, token_hash) VALUES (?, ?, ?)").bind(
-      id,
-      venueId,
-      await sha256Hex(token),
-    ),
-    audit(c.env.DB, "admin", "access_link.create", id, venueId),
+      `INSERT INTO accounts (id, email, password_hash, role, venue_id) VALUES (?, ?, ?, 'arena', ?)`,
+    ).bind(id, email, await hashPassword(password), venueId),
+    audit(c.env.DB, "admin", "account.create", id, venueId),
   ]);
-  return c.json({ id, url: `${new URL(c.req.url).origin}/a/${token}` }, 201);
+  return c.json({ id, email, password }, 201);
 });
 
-admin.delete("/venues/:id/access-link", async (c) => {
+admin.patch("/venues/:id/accounts/:accountId", async (c) => {
   const venueId = c.req.param("id");
+  const accountId = c.req.param("accountId");
+  const account = await c.env.DB.prepare(
+    `SELECT id, email FROM accounts WHERE id = ? AND venue_id = ? AND role = 'arena'`,
+  )
+    .bind(accountId, venueId)
+    .first<{ id: string; email: string }>();
+  if (!account) return c.json({ error: "account_not_found" }, 404);
+
+  const body = await readBody<{ password?: string; disabled?: boolean }>(c);
+  const stmts = [];
+  let password: string | undefined;
+
+  if (body.password !== undefined) {
+    password =
+      typeof body.password === "string" && body.password.length >= 8 ? body.password : generatePassword();
+    stmts.push(
+      c.env.DB.prepare(`UPDATE accounts SET password_hash = ?, disabled_at = NULL WHERE id = ?`).bind(
+        await hashPassword(password),
+        accountId,
+      ),
+    );
+    stmts.push(audit(c.env.DB, "admin", "account.reset_password", accountId, venueId));
+  }
+
+  if (typeof body.disabled === "boolean") {
+    stmts.push(
+      c.env.DB.prepare(
+        body.disabled
+          ? `UPDATE accounts SET disabled_at = datetime('now') WHERE id = ?`
+          : `UPDATE accounts SET disabled_at = NULL WHERE id = ?`,
+      ).bind(accountId),
+    );
+    stmts.push(
+      audit(c.env.DB, "admin", body.disabled ? "account.disable" : "account.enable", accountId, venueId),
+    );
+  }
+
+  if (!stmts.length) return c.json({ error: "nothing_to_update" }, 400);
+  await c.env.DB.batch(stmts);
+  return c.json({ id: account.id, email: account.email, ...(password ? { password } : {}) });
+});
+
+admin.delete("/venues/:id/accounts/:accountId", async (c) => {
+  const venueId = c.req.param("id");
+  const accountId = c.req.param("accountId");
   const [result] = await c.env.DB.batch([
     c.env.DB.prepare(
-      "UPDATE venue_access_links SET revoked_at = datetime('now') WHERE venue_id = ? AND revoked_at IS NULL",
-    ).bind(venueId),
-    audit(c.env.DB, "admin", "access_link.revoke", null, venueId),
+      `UPDATE accounts SET disabled_at = datetime('now')
+       WHERE id = ? AND venue_id = ? AND role = 'arena' AND disabled_at IS NULL`,
+    ).bind(accountId, venueId),
+    audit(c.env.DB, "admin", "account.disable", accountId, venueId),
   ]);
-  if (!result.meta.changes) return c.json({ error: "access_link_not_found" }, 404);
+  if (!result.meta.changes) return c.json({ error: "account_not_found" }, 404);
   return c.json({ ok: true });
 });
 

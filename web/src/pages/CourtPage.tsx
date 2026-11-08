@@ -9,9 +9,10 @@ import { DayPicker } from "../components/DayPicker";
 import { EmptyState } from "../components/EmptyState";
 import { FeaturedClip } from "../components/FeaturedClip";
 import { HourGroup } from "../components/HourGroup";
-import { Logo } from "../components/Logo";
+import { Logo, RecDot } from "../components/Logo";
 import { GallerySkeleton } from "../components/Skeletons";
 import { Toast } from "../components/Toast";
+import { paths } from "../routes";
 import { BrandScope } from "../shared/brand";
 
 const POLL_MS = 15_000;
@@ -42,7 +43,7 @@ function useNewClipToast(clips: ClipSummary[] | undefined, date: string | undefi
     if (!prev || prev.date !== date) return;
     const fresh = clips.filter((c) => !prev.ids.has(c.id)).length;
     if (fresh === 0) return;
-    setMessage(fresh === 1 ? "Novo replay chegou!" : `${fresh} replays novos!`);
+    setMessage(fresh === 1 ? "Seu lance ficou salvo." : `Mais ${fresh} lances estão prontos.`);
     const t = setTimeout(() => setMessage(null), TOAST_MS);
     return () => clearTimeout(t);
   }, [clips, date]);
@@ -74,14 +75,15 @@ export function CourtPage() {
         <AppHeader />
         <main className="animate-rise-in mx-auto flex max-w-md flex-col items-center gap-4 px-6 py-20 text-center">
           <SearchX className="size-12 text-zinc-600" />
-          <h1 className="font-display text-4xl leading-none font-black uppercase italic">
+          <h1 className="font-display text-4xl leading-none">
             Quadra não encontrada
+            <RecDot />
           </h1>
           <p className="text-zinc-400">
             Confira o código <span className="font-mono text-zinc-200">{key}</span> ou escaneie de
             novo o QR ao lado do botão.
           </p>
-          <Link to="/" className="mt-2 rounded-full bg-lime px-5 py-2.5 text-sm font-bold text-ink">
+          <Link to="/" className="mt-2 rounded-full bg-white px-5 py-2.5 text-sm font-bold text-ink">
             Voltar ao início
           </Link>
         </main>
@@ -106,7 +108,7 @@ export function CourtPage() {
       <main className="mx-auto flex max-w-3xl flex-col gap-6 px-4 pb-10">
         <CourtHero
           venueName={court.data?.venue_name}
-          venueHref={court.data?.venue_key ? `/g/${court.data.venue_key}` : null}
+          venueHref={court.data?.venue_key ? paths.gallery(court.data.venue_key) : null}
           courtName={court.data?.name}
           brand={court.data?.brand}
           isToday={isToday}

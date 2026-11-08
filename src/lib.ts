@@ -2,8 +2,12 @@ export type Bindings = {
   DB: D1Database;
   CLIPS: R2Bucket;
   ASSETS: Fetcher;
-  ADMIN_TOKEN: string;
+  /** Scripts/e2e legados (Bearer). Login do painel é email/senha. */
+  ADMIN_TOKEN?: string;
   SESSION_SECRET: string;
+  /** Seed do 1º admin se a tabela estiver vazia (local/dev). */
+  BOOTSTRAP_ADMIN_PASSWORD?: string;
+  BOOTSTRAP_ADMIN_EMAIL?: string;
   IP_HASH_SALT?: string;
   RETENTION_DAYS?: string;
   DEVICE_OFFLINE_SEC?: string;
@@ -25,7 +29,13 @@ export type Device = {
 
 export type Env = {
   Bindings: Bindings;
-  Variables: { device: Device; sessionExp: number; venueId: string };
+  Variables: {
+    device: Device;
+    sessionExp: number;
+    venueId: string;
+    accountId: string;
+    accountEmail: string;
+  };
 };
 
 /** Brasil sem horário de verão desde 2019: UTC-3 fixo. */

@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Replay — Guia do sistema (implementado)</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm 18mm 16mm; }
+    @font-face { font-family: "DocSans"; src: url("file:///C:/Windows/Fonts/arial.ttf"); }
+    @font-face { font-family: "DocMono"; src: url("file:///C:/Windows/Fonts/consola.ttf"); }
+    :root {
+      --ink: #111;
+      --muted: #444;
+      --line: #ccc;
+      --bg: #f4f4f1;
+      --accent: #3a4d12;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      color: var(--ink);
+      font: 10.5pt/1.45 DocSans, Arial, sans-serif;
+    }
+    h1 { font-size: 22pt; line-height: 1.15; margin: 0 0 8pt; }
+    h2 { font-size: 14pt; margin: 22pt 0 8pt; page-break-after: avoid; border-bottom: 1.5pt solid var(--ink); padding-bottom: 3pt; }
+    h3 { font-size: 11.5pt; margin: 14pt 0 6pt; page-break-after: avoid; }
+    h4 { font-size: 10.5pt; margin: 10pt 0 4pt; page-break-after: avoid; }
+    p { margin: 0 0 7pt; }
+    ul, ol { margin: 0 0 8pt 18pt; padding: 0; }
+    li { margin: 0 0 3pt; }
+    code, kbd, pre { font-family: DocMono, Consolas, monospace; font-size: 8.8pt; }
+    code { background: var(--bg); padding: 0 3px; }
+    pre {
+      background: var(--bg);
+      border: 0.5pt solid var(--line);
+      padding: 8pt 10pt;
+      white-space: pre-wrap;
+      word-break: break-all;
+      page-break-inside: avoid;
+      margin: 0 0 10pt;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 0 0 10pt; font-size: 9.5pt; page-break-inside: auto; }
+    th, td { border: 0.4pt solid #bbb; padding: 4pt 6pt; vertical-align: top; text-align: left; }
+    th { background: #eee; font-weight: 650; }
+    tr { page-break-inside: avoid; }
+    .cover { page-break-after: always; min-height: 240mm; display: flex; flex-direction: column; justify-content: space-between; }
+    .kicker { letter-spacing: .18em; text-transform: uppercase; font-size: 9pt; color: var(--accent); font-weight: 700; }
+    .meta { color: var(--muted); font-size: 10pt; }
+    .toc a { color: inherit; text-decoration: none; }
+    .toc li { margin: 0 0 4pt; }
+    .note { border-left: 3pt solid var(--accent); padding: 6pt 10pt; background: var(--bg); margin: 0 0 10pt; page-break-inside: avoid; }
+    .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; }
+    .small { font-size: 9pt; color: var(--muted); }
+    .mono { font-family: DocMono, Consolas, monospace; font-size: 9pt; }
+    footer { display: none; }
+  </style>
+</head>
+<body>
+
+<section class="cover">
+  <div>
+    <p class="kicker">Projeto Replay · documentação de sistema</p>
+    <h1>Guia completo do que está implementado</h1>
+    <p class="meta">Hardware do piloto + software em produção. Somente o que já existe no código e no equipamento ligado. Sem roadmap.</p>
+    <p class="meta">Versão do agente na borda: <strong>0.4.5</strong> · Worker Cloudflare · D1 <code>replay-db</code> · R2 <code>replay-clips</code></p>
+    <p class="meta">Base pública: <code>https://loopreplay.com.br</code> (fallback <code>workers.dev</code>)</p>
+    <p class="meta">Repositório: <code>gabvaz/projeto-replay</code> · branch <code>main</code></p>
+    <p class="meta">Documento gerado em 21/10/2026 (BRT).</p>
+  </div>
+  <div>
+    <h3>O produto, em uma frase</h3>
+    <p>Jogador aperta um botão na quadra. Os ~20 segundos anteriores (buffer circular na Raspberry Pi) mais 3 segundos depois viram um MP4, sobem para a nuvem e aparecem na galeria do QR. Os vídeos expiram em 7 dias.</p>
+    <p class="small">Isto não é NVR, não é live, não é transcodificação na nuvem. O gatilho é local (ESP32 + Pi). A nuvem só recebe, guarda, lista e entrega o arquivo.</p>
+  </div>
+</section>
+
+<h2>Sumário</h2>
+<ol class="toc">
+  <li>Visão geral e papéis</li>
+  <li>Hardware do piloto (topologia, pinos, IPs)</li>
+  <li>Firmware do botão (ESP32)</li>
+  <li>Agente na Pi (buffer, clip, upload, serial, systemd)</li>
+  <li>Instalação e operação da borda</li>
+  <li>Nuvem: Worker, D1, R2, crons</li>
+  <li>APIs públicas, edge, admin e portal</li>
+  <li>Front: rotas e comportamento</li>
+  <li>Modelo de dados</li>
+  <li>Autenticação e segurança</li>
+  <li>Observabilidade e alertas</li>
+  <li>Mapa de arquivos no repositório</li>
+  <li>Como usar o piloto no dia a dia</li>
+</ol>
+
+<h2>1. Visão geral e papéis</h2>
+<p>Três camadas, cada uma com um trabalho só:</p>
+<table>
+  <tr><th>Camada</th><th>Onde</th><th>Faz</th><th>Não faz</th></tr>
+  <tr><td>Quadra</td><td>Câmera PoE + ESP32 + botão</td><td>Imagem contínua RTSP; aperto físico</td><td>Upload, galeria, internet</td></tr>
+  <tr><td>Borda</td><td>Raspberry Pi 3 B+</td><td>Buffer, concat, MP4, fila, PUT no Worker, heartbeat</td><td>Servir o site; transcodificar na nuvem</td></tr>
+  <tr><td>Nuvem</td><td>Cloudflare Worker + D1 + R2</td><td>Slot de upload, storage, galeria, painel, portal, retenção</td><td>Falar com a câmera ou com o ESP</td></tr>
+</table>
+<p>O Worker <strong>não alcança</strong> a câmera. A API local do agente escuta só <code>127.0.0.1</code>. Quem dispara o clip é: botão USB-serial, <code>POST /local/replay</code> na Pi, tecla no terminal, ou <code>T</code> no serial.</p>
+<p>Fuso de galeria e retenção: <strong>Brasilia UTC-3 fixo</strong> (sem horario de verao). Datas na UI sao "hoje" em BRT, nao no relogio do celular.</p>
+<p>Retenção padrão: <code>RETENTION_DAYS=7</code>. Clip ganha <code>expires_at = recorded_at + 7 dias</code> no pedido de slot. Cron diário apaga D1 + objetos R2 vencidos.</p>
+
+<h2>2. Hardware do piloto</h2>
+<p>Uma quadra em operação contínua: <code>demo01</code>. Hostname da Pi: <code>replay-quadra1</code>. Modelo: Raspberry Pi 3 Model B Plus Rev 1.4, ~905 MiB RAM, aarch64, Raspberry Pi OS.</p>
+
+<h3>2.1 Topologia</h3>
+<pre>
+Internet -- Wi-Fi (wlan0) -- Raspberry Pi 3 B+
+                              IP LAN tipico: 192.168.0.13
+                              |
+                              | cabo Ethernet (eth0)
+                              v
+                         switch PoE
+                              | cabo PoE
+                              v
+                    camera IP 192.168.1.108:554
+
+ESP32 -- USB -- Pi   (/dev/replay-button -> ttyACM0 neste piloto)
+Botao NA entre GPIO 4 e GND
+LED    GPIO 2 (LED da DevKit) + GND, resistor 220-330 ohm se for LED externo
+</pre>
+<p>Duas redes na Pi de propósito:</p>
+<ul>
+  <li><strong>wlan0</strong> — internet: SSH, heartbeat, upload do MP4 para o Worker.</li>
+  <li><strong>eth0</strong> — só câmera, via switch. A câmera não tem rota para a internet.</li>
+</ul>
+<p>O RTSP nunca atravessa Wi‑Fi neste piloto. Isso é o que deixa o buffer estável.</p>
+
+<h3>2.2 Câmera</h3>
+<table>
+  <tr><th>Item</th><th>Valor no piloto</th></tr>
+  <tr><td>Endereço</td><td><code>192.168.1.108</code></td></tr>
+  <tr><td>Protocolo</td><td>RTSP sobre TCP (porta 554)</td></tr>
+  <tr><td>Path main</td><td><code>/cam/realmonitor?channel=1&amp;subtype=0</code></td></tr>
+  <tr><td>Path extra (não usado no agent atual)</td><td><code>/cam/realmonitor?channel=1&amp;subtype=1</code></td></tr>
+  <tr><td>Auth</td><td>user/senha na URL; <code>@</code> na senha vai percent-encoded (<code>%40</code>)</td></tr>
+  <tr><td>Alimentação</td><td>PoE 802.3af pelo switch</td></tr>
+  <tr><td>Áudio no replay</td><td>Descartado (<code>-an</code> / <code>-map 0:v:0</code>)</td></tr>
+</table>
+<p>A URL RTSP no <code>edge.env</code> precisa de aspas se tiver <code>&amp;</code>, senão o systemd corta o valor.</p>
+<pre>RTSP_URL='rtsp://admin:SENHA_ENCODED@192.168.1.108:554/cam/realmonitor?channel=1&amp;subtype=0'
+RTSP_TRANSPORT=tcp</pre>
+
+<h3>2.3 Raspberry Pi — o que está instalado</h3>
+<table>
+  <tr><th>Item</th><th>Detalhe</th></tr>
+  <tr><td>Usuário de SSH</td><td><code>pi</code></td></tr>
+  <tr><td>Usuário do serviço</td><td><code>replay</code> (system, grupos <code>dialout</code> e <code>video</code>)</td></tr>
+  <tr><td>Node</td><td>22.x em <code>/usr/local/bin/node</code></td></tr>
+  <tr><td>ffmpeg</td><td>pacote Debian; copy H.264 do RTSP, concat, thumb</td></tr>
+  <tr><td>Serviço</td><td><code>replay-agent.service</code> — <code>Restart=always</code>, <code>RestartSec=3</code>, <code>MemoryMax=500M</code>, <code>Nice=-5</code></td></tr>
+  <tr><td>Watchdog</td><td><code>dtparam=watchdog=on</code> no config.txt + <code>RuntimeWatchdogSec=15</code></td></tr>
+  <tr><td>journald</td><td><code>SystemMaxUse=50M</code> (protege o cartão SD)</td></tr>
+  <tr><td>Buffer</td><td><code>/dev/shm/replay</code> (RAM, não SD)</td></tr>
+  <tr><td>Outbox</td><td><code>/var/lib/replay/outbox</code> (persiste reboot)</td></tr>
+</table>
+<p>Há suporte no código a uma <strong>segunda instância</strong> do agent (outra <code>EDGE_PORT</code>, outro <code>COURT_KEY</code>, outro <code>BUFFER_DIR</code>). Isso foi usado em teste. O systemd instalado é <strong>um</strong> serviço / uma quadra. Reboot não sobe segunda câmera.</p>
+
+<h3>2.4 ESP32 e botão</h3>
+<table>
+  <tr><th>Função</th><th>Pino</th><th>Ligação</th></tr>
+  <tr><td>Botão</td><td><strong>GPIO 4</strong></td><td>NA entre GPIO 4 e <strong>GND</strong>. Pull-up interno. Nunca 3V3 no pino.</td></tr>
+  <tr><td>LED de estado</td><td>GPIO 2</td><td>LED da placa na DevKit típica, ou LED + 220–330 Ω para GND</td></tr>
+  <tr><td>USB</td><td>—</td><td>Serial 115200. Neste piloto: <code>ttyACM0</code> (USB nativo Espressif VID <code>303a</code>)</td></tr>
+</table>
+<p>Regra udev <code>edge/pi/99-replay-button.rules</code> cria <code>/dev/replay-button</code> para:</p>
+<ul>
+  <li>CP210x — <code>10c4:ea60</code></li>
+  <li>CH340 — <code>1a86:7523</code></li>
+  <li>CH9102 — <code>1a86:55d4</code></li>
+  <li>ESP32-S3/C3 USB nativo — <code>303a:1001</code></li>
+</ul>
+<p>Grupo <code>dialout</code>, modo <code>0660</code>. O serviço do agent pertence a esse grupo.</p>
+
+<h2>3. Firmware do botão</h2>
+<p>Arquivo: <code>firmware/button/button.ino</code>. Arduino / ESP32. Serial 115200, uma mensagem por linha, <code>\n</code>.</p>
+
+<h3>3.1 Protocolo</h3>
+<table>
+  <tr><th>Direção</th><th>Linha</th><th>Significado</th></tr>
+  <tr><td>ESP → Pi</td><td><code>BTN</code></td><td>Aperto válido (debounce 50 ms, borda de descida)</td></tr>
+  <tr><td>ESP → Pi</td><td><code>HB</code></td><td>Heartbeat a cada 10 s</td></tr>
+  <tr><td>Pi → ESP</td><td><code>ACK</code></td><td>Resposta ao HB (Pi vivo)</td></tr>
+  <tr><td>Pi → ESP</td><td><code>REC</code></td><td>Aceitou o aperto, está gravando</td></tr>
+  <tr><td>Pi → ESP</td><td><code>OK</code></td><td>Clip gerado (upload pode ainda estar na fila)</td></tr>
+  <tr><td>Pi → ESP</td><td><code>ERR</code></td><td>Falhou gerar</td></tr>
+  <tr><td>Pi → ESP</td><td><code>BUSY</code></td><td>Já gravando ou cooldown</td></tr>
+  <tr><td>Debug → ESP</td><td><code>T</code></td><td>Mesmo efeito do botão (serial monitor)</td></tr>
+</table>
+
+<h3>3.2 Constantes</h3>
+<table>
+  <tr><th>Constante</th><th>Valor</th></tr>
+  <tr><td><code>BUTTON_PIN</code></td><td>4</td></tr>
+  <tr><td><code>LED_PIN</code></td><td>2</td></tr>
+  <tr><td><code>DEBOUNCE_MS</code></td><td>50</td></tr>
+  <tr><td><code>HB_EVERY_MS</code></td><td>10 000</td></tr>
+  <tr><td><code>REPLY_TIMEOUT_MS</code></td><td>2 000 (sem REC/BUSY após BTN → NO_HOST)</td></tr>
+  <tr><td><code>RECORDING_TIMEOUT_MS</code></td><td>60 000</td></tr>
+  <tr><td><code>FEEDBACK_MS</code></td><td>1 500 (mostra ERR)</td></tr>
+  <tr><td><code>HOST_TIMEOUT_MS</code></td><td>3×HB + 2 s ≈ 32 s sem ACK → LED apaga</td></tr>
+</table>
+
+<h3>3.3 LED</h3>
+<table>
+  <tr><th>Estado</th><th>LED</th></tr>
+  <tr><td>READY</td><td>Aceso fixo</td></tr>
+  <tr><td>WAITING_REPLY / RECORDING</td><td>Pisca ~4 Hz</td></tr>
+  <tr><td>SHOW_OK</td><td>Aceso 2 s + 3 piscadas lentas</td></tr>
+  <tr><td>SHOW_ERR</td><td>Pisca rápido 1,5 s</td></tr>
+  <tr><td>NO_HOST</td><td>Apagado</td></tr>
+</table>
+<p>Aperto em <code>NO_HOST</code> ainda envia <code>BTN</code> (a Pi pode ter voltado). Só ignora se já está em WAITING/RECORDING/feedback.</p>
+
+<h2>4. Agente na Pi</h2>
+<p>Arquivo: <code>edge/agent.mjs</code>. Sem dependências npm. Sobe com <code>/etc/replay/edge.env</code> (systemd) ou <code>edge/.env</code> (PC).</p>
+<p>Se <code>EDGE_TOKEN</code> estiver vazio o processo recusa subir (não envia clip anônimo).</p>
+
+<h3>4.1 Variáveis de ambiente</h3>
+<table>
+  <tr><th>Nome</th><th>Padrão no código / install</th><th>Função</th></tr>
+  <tr><td><code>API_BASE</code></td><td>URL do Worker</td><td>Base HTTPS dos PUT/heartbeat</td></tr>
+  <tr><td><code>COURT_KEY</code></td><td><code>demo01</code></td><td>Deve existir em <code>courts.public_key</code> da mesma arena do device</td></tr>
+  <tr><td><code>EDGE_TOKEN</code></td><td>—</td><td>Bearer do device; só o SHA-256 fica no D1</td></tr>
+  <tr><td><code>RTSP_URL</code></td><td>vazio</td><td>Vazio = <code>testsrc</code> 1280×720 sintético (dev)</td></tr>
+  <tr><td><code>RTSP_TRANSPORT</code></td><td><code>tcp</code></td><td><code>udp</code> só se a cam recusar TCP</td></tr>
+  <tr><td><code>EDGE_PORT</code></td><td>8788</td><td>HTTP local 127.0.0.1</td></tr>
+  <tr><td><code>PRE_ROLL_SEC</code></td><td>20 (install) / 15 (código)</td><td>Segundos do passado no clip</td></tr>
+  <tr><td><code>POST_ROLL_SEC</code></td><td>3</td><td>Espera depois do aperto antes de concatenar</td></tr>
+  <tr><td><code>SEGMENT_SEC</code></td><td>2</td><td>Alvo do muxer de segmentos</td></tr>
+  <tr><td><code>COOLDOWN_SEC</code></td><td>5</td><td>Ignora apertos seguintes</td></tr>
+  <tr><td><code>OUTPUT_FORMAT</code></td><td><code>story</code> no install.sh</td><td><code>story</code> = re-encode 540×960; vazio = copy</td></tr>
+  <tr><td><code>CAMERA_ROTATION</code></td><td>0</td><td>0, 90 ou 270. Em story vira transpose; em copy vira metadata/display_rotation</td></tr>
+  <tr><td><code>BUTTON_SERIAL</code></td><td><code>/dev/replay-button</code></td><td>Só Linux</td></tr>
+  <tr><td><code>BUFFER_DIR</code></td><td><code>/dev/shm/replay</code> no Linux</td><td>Segmentos .ts</td></tr>
+  <tr><td><code>OUTBOX_DIR</code></td><td><code>/var/lib/replay/outbox</code></td><td>MP4 + JSON + events.jsonl</td></tr>
+  <tr><td><code>OUTBOX_MAX_MB</code></td><td>200</td><td>Descarta os mais antigos se estourar (<code>queue_drop</code>)</td></tr>
+  <tr><td><code>HEARTBEAT_SEC</code></td><td>60</td><td>POST <code>/edge/heartbeat</code></td></tr>
+  <tr><td><code>OPEN_UI</code></td><td>—</td><td><code>1</code> abre o browser local (PC)</td></tr>
+  <tr><td><code>FFMPEG_PATH</code></td><td>—</td><td>Override do binário ffmpeg</td></tr>
+</table>
+
+<h3>4.2 Buffer circular</h3>
+<p>ffmpeg contínuo, vídeo copy, sem áudio, segmentos MPEG-TS:</p>
+<pre>-rtsp_transport tcp -timeout 5000000 -i RTSP_URL
+-map 0:v:0 -c:v copy -an
+-f segment -segment_time 2 -segment_wrap N -reset_timestamps 1
+-segment_format mpegts /dev/shm/replay/seg_%03d.ts</pre>
+<p><code>SEGMENT_WRAP = ceil((PRE+POST+10)/SEGMENT) + 5</code>. Com pre 20 / post 3 / seg 2 ≈ 22 arquivos.</p>
+<p><code>-timeout 5000000</code> é 5 s em microsegundos: câmera some → ffmpeg sai → supervisor relança.</p>
+<p>Backoff de restart: 1, 2, 5, 10, 30 s. Se o processo durou mais de 60 s, o backoff zera. Cada saída gera evento <code>ffmpeg_restart</code>.</p>
+<p>Watchdog de stall: se o ffmpeg está vivo mas nenhum <code>.ts</code> novo por <code>max(3×SEGMENT, 6)</code> s, manda SIGKILL (câmera “congelada”).</p>
+<p>Senha RTSP é mascarada no stderr antes de ir ao journald.</p>
+
+<h3>4.3 Montagem do clip</h3>
+<ol>
+  <li>Marca <code>busy</code>, evento <code>press</code>, espera <code>POST_ROLL_SEC</code>.</li>
+  <li>Lista segmentos por mtime. Soma duração real (intervalo entre mtimes) porque o GOP da câmera faz cada .ts durar mais que 2 s.</li>
+  <li>Exige pelo menos 3 segmentos e cobertura ≥ metade de (pre+post). Senão: <code>buffer ainda frio</code>.</li>
+  <li>Concat ffmpeg <code>-f concat -safe 0</code>.</li>
+  <li>Se <code>OUTPUT_FORMAT=story</code>: crop central 9:16 (ou transpose 90/270) + <code>scale=540:960</code> + libx264 <code>ultrafast</code> CRF 26, 3 threads, yuv420p, <code>+faststart</code>, sem áudio.</li>
+  <li>Se vazio: <code>-c copy</code> + faststart (landscape nativo).</li>
+  <li>Thumb: um JPEG (largura 480) extraído do MP4.</li>
+  <li>Escreve <code>{clip_id}.mp4</code> + <code>{clip_id}.json</code> (clip_id, court_key, recorded_at) na outbox. JSON via write+rename atômico.</li>
+</ol>
+<p>Gera UUID do clip na Pi. O slot no Worker é idempotente nesse id — queda de internet no meio do PUT não duplica.</p>
+
+<h3>4.4 Upload</h3>
+<ol>
+  <li><code>POST /edge/clips/upload-slot</code> com <code>Authorization: Bearer EDGE_TOKEN</code>, body <code>{ court_key, clip_id, recorded_at }</code>.</li>
+  <li><code>PUT /edge/clips/:id/content</code> — corpo = bytes do MP4.</li>
+  <li><code>PUT /edge/clips/:id/thumbnail</code> — JPEG.</li>
+  <li>Apaga a entrada da outbox; evento <code>clip_ok</code>.</li>
+</ol>
+<p>Falha: backoff 5, 15, 30, 60, 120, 300 s. Evento <code>clip_fail</code>. A outbox sobrevive a reboot.</p>
+
+<h3>4.5 HTTP local (127.0.0.1)</h3>
+<table>
+  <tr><th>Método</th><th>Path</th><th>Função</th></tr>
+  <tr><td>GET</td><td><code>/</code></td><td>UI mínima (botão de replay no browser da Pi)</td></tr>
+  <tr><td>GET</td><td><code>/health</code></td><td>JSON: ok, busy, court, api, buffer_alive, queue_len, pending_events</td></tr>
+  <tr><td>POST</td><td><code>/local/replay</code></td><td>Dispara o mesmo pipeline do botão</td></tr>
+  <tr><td>POST</td><td><code>/local/serial-t</code></td><td>Escreve <code>T\n</code> na porta (debug do firmware)</td></tr>
+</table>
+<p>Teclado no TTY: Enter, Espaço ou R também disparam.</p>
+
+<h3>4.6 Serial USB — detalhe que evita reset eterno</h3>
+<p>Um único <code>openSync(path, "r+")</code>. Dois streams na mesma path erguem DTR duas vezes e o ESP fica em boot loop. Depois do open, pulso RTS/DTR via Python embutido (<code>releaseEspReset</code>) e <code>stty -hupcl</code> para não derrubar DTR ao fechar.</p>
+<p>Primeiro chunk após conectar costuma ser lixo de boot (<code>rst:0x1 POWERON_RESET</code>) — o agent loga só esse primeiro pedaço. Linhas seguintes <code>HB</code>/<code>BTN</code> não poluem o journal.</p>
+
+<h3>4.7 Heartbeat (payload)</h3>
+<p>JSON aproximado enviado a cada 60 s, mais eventos pendentes (máx. 50 por request, 500 em disco):</p>
+<ul>
+  <li><code>agent_version</code> = <code>0.4.5</code></li>
+  <li><code>temp_c</code>, <code>throttled</code> (vcgencmd)</li>
+  <li><code>load1</code>, <code>mem_free_mb</code>, <code>mem_total_mb</code>, <code>uptime_s</code></li>
+  <li><code>buffer_alive</code>, <code>segments</code>, <code>busy</code>, <code>queue_len</code></li>
+  <li><code>button_alive</code> (HB recente)</li>
+  <li><code>ffmpeg_restarts_1h</code></li>
+  <li><code>events[]</code>: <code>press | clip_ok | clip_fail | ffmpeg_restart | boot | queue_drop</code> com <code>at</code> ISO e <code>detail</code> ≤ 200 chars</li>
+</ul>
+
+<h2>5. Instalação e operação da borda</h2>
+<h3>5.1 install.sh</h3>
+<p><code>sudo bash edge/pi/install.sh [--hostname ...] [--tailscale-authkey ...]</code></p>
+<p>Idempotente: atualiza agent, udev, unit, journald, watchdog. <strong>Não</strong> sobrescreve <code>/etc/replay/edge.env</code> se já existir.</p>
+<p>Se <code>COURT_KEY</code> ou <code>EDGE_TOKEN</code> estiverem vazios, habilita o serviço mas não inicia.</p>
+<p>Instala Tailscale com <code>--ssh</code> (acesso remoto sem abrir porta 22 na internet).</p>
+
+<h3>5.2 Criar device</h3>
+<pre>$env:ADMIN_TOKEN="..."
+npm run admin:device -- --venue=venue-demo --name="Pi Arena Demo"</pre>
+<p>Imprime <code>EDGE_TOKEN=...</code> uma vez. Cole no <code>edge.env</code> e <code>systemctl restart replay-agent</code>.</p>
+
+<h3>5.3 Atualizar o agent de outro PC</h3>
+<pre>powershell -File edge/pi/update.ps1 -PiHost replay-quadra1
+powershell -File edge/pi/update.ps1 -PiHost replay-quadra1 -Full</pre>
+<p><code>-Full</code> reenvia install.sh, unit e udev. Sem <code>-Full</code> só troca <code>agent.mjs</code> e restart.</p>
+
+<h3>5.4 Comandos no Pi</h3>
+<pre>systemctl status replay-agent
+journalctl -u replay-agent -f
+curl -s 127.0.0.1:8788/health
+curl -sS -X POST http://127.0.0.1:8788/local/replay
+sudo nano /etc/replay/edge.env
+sudo systemctl restart replay-agent
+ls -l /dev/replay-button</pre>
+
+<h3>5.5 Unit systemd (campos)</h3>
+<pre>[Service]
+User=replay
+Group=replay
+SupplementaryGroups=dialout video
+EnvironmentFile=/etc/replay/edge.env
+WorkingDirectory=/opt/replay
+ExecStart=/usr/local/bin/node /opt/replay/agent.mjs
+Restart=always
+RestartSec=3
+MemoryMax=500M
+Nice=-5
+KillMode=control-group
+TimeoutStopSec=10
+StartLimitIntervalSec=0</pre>
+
+<h2>6. Nuvem</h2>
+<h3>6.1 Worker</h3>
+<table>
+  <tr><th>Campo</th><th>Valor</th></tr>
+  <tr><td>Nome</td><td><code>projeto-replay</code></td></tr>
+  <tr><td>Entrada</td><td><code>src/index.ts</code> (Hono)</td></tr>
+  <tr><td>Assets</td><td><code>web/dist</code>, SPA <code>not_found_handling</code></td></tr>
+  <tr><td>Worker-first</td><td><code>/api/* /edge/* /admin/* /clips/* /courts/* /c/* /v/* /portal/* /a/* /brand/* /__scheduled</code></td></tr>
+  <tr><td>D1</td><td><code>replay-db</code> id <code>ef8f09c2-b761-40be-a856-42efa8c22bd1</code></td></tr>
+  <tr><td>R2</td><td><code>replay-clips</code> binding <code>CLIPS</code></td></tr>
+  <tr><td>Compat date</td><td>2026-09-24</td></tr>
+</table>
+<p>Vars no <code>wrangler.jsonc</code>:</p>
+<table>
+  <tr><th>Var</th><th>Produção atual</th></tr>
+  <tr><td><code>RETENTION_DAYS</code></td><td><code>7</code></td></tr>
+  <tr><td><code>DEVICE_OFFLINE_SEC</code></td><td><code>180</code> (painel: sem HB = offline)</td></tr>
+  <tr><td><code>SUPPORT_WHATSAPP</code></td><td>vazio (esconde no portal)</td></tr>
+  <tr><td><code>APP_URL</code></td><td><code>https://loopreplay.com.br</code></td></tr>
+  <tr><td><code>ALERT_EMAIL_FROM</code> / <code>TO</code></td><td>vazios → e-mail <strong>não</strong> sai, só <code>console.log</code></td></tr>
+</table>
+<p>Secrets (não no jsonc): <code>SESSION_SECRET</code>, <code>IP_HASH_SALT</code>; opcional <code>ADMIN_TOKEN</code> (Bearer só pra scripts). Local: <code>BOOTSTRAP_ADMIN_EMAIL</code> / <code>BOOTSTRAP_ADMIN_PASSWORD</code> no <code>.dev.vars</code> criam o 1º admin se a tabela <code>accounts</code> estiver vazia.</p>
+<p>Binding de e-mail (<code>send_email</code>) está comentado no wrangler até o domínio entrar no Email Routing.</p>
+<p>Deploy: <code>npm run deploy</code> (= <code>vite build</code> + <code>wrangler deploy</code>).</p>
+<p>Migrações: <code>npm run db:migrate:local</code> / <code>db:migrate:remote</code>. Até <code>0009_accounts.sql</code>.</p>
+
+<h3>6.2 Objetos no R2</h3>
+<table>
+  <tr><th>Key</th><th>Conteúdo</th></tr>
+  <tr><td><code>courts/{courtId}/{clipId}.mp4</code></td><td>vídeo</td></tr>
+  <tr><td><code>courts/{courtId}/{clipId}.jpg</code></td><td>thumb</td></tr>
+  <tr><td><code>brand/{venueId}/logo-{rand}</code></td><td>logo PNG/JPEG/WebP (SVG recusado)</td></tr>
+</table>
+<p>Bucket não é público. Entrega só via Worker (<code>/clips/:id</code> com range 206, cache curto; thumb cache 1 dia; logo com <code>?v=</code> immutable).</p>
+
+<h3>6.3 Crons</h3>
+<table>
+  <tr><th>Cron</th><th>Job</th><th>Faz</th></tr>
+  <tr><td><code>*/5 * * * *</code></td><td><code>runAlerts</code></td><td>Abre/fecha alertas. Offline de alerta = 10 min (mais lento que os 180 s do painel). Dedupa por (device, kind). E-mail só na mudança, se FROM/TO existirem.</td></tr>
+  <tr><td><code>0 9 * * *</code> (06:00 BRT)</td><td><code>runDaily</code></td><td>Purge clips expirados e pending &gt; 1 dia; apaga heartbeats &gt; 7 d; events/alerts resolvidos &gt; 90 d; <code>ensureInvoices</code>; resumo 24h (apertos → clips).</td></tr>
+</table>
+<p>Códigos de alerta do payload: <code>hot</code> (≥75 °C), <code>throttled</code>, <code>buffer</code>, <code>queue</code> (&gt;3), <code>button</code>, <code>camera</code> (≥3 restarts ffmpeg/h), mais <code>offline</code>.</p>
+
+<h2>7. APIs</h2>
+<p>CORS em <code>/api/*</code>, <code>/courts/*</code>, <code>/clips/*</code>.</p>
+
+<h3>7.1 Público / jogador</h3>
+<table>
+  <tr><th>Método</th><th>Path</th><th>Auth</th><th>Notas</th></tr>
+  <tr><td>GET</td><td><code>/api/health</code></td><td>—</td><td><code>{ ok, service, core, trigger: "local-only" }</code></td></tr>
+  <tr><td>GET</td><td><code>/api/courts/:key</code></td><td>—</td><td>quadra + brand + venue_key + retention + today BRT</td></tr>
+  <tr><td>GET</td><td><code>/api/courts/:key/clips?date=YYYY-MM-DD</code></td><td>—</td><td>clips ready do dia, máx. 300, hora BRT</td></tr>
+  <tr><td>GET</td><td><code>/api/venues/:key</code></td><td>—</td><td>arena pública + lista de quadras</td></tr>
+  <tr><td>GET</td><td><code>/api/venues/:key/clips?date=&amp;court=</code></td><td>—</td><td>todas as quadras ou filtro; máx. 500</td></tr>
+  <tr><td>GET</td><td><code>/api/clips/:id</code></td><td>—</td><td>detalhe + brand + venue_key; 404 se expirado</td></tr>
+  <tr><td>POST</td><td><code>/api/clips/:id/events</code></td><td>—</td><td>body <code>{ type: "view" \| "share" }</code></td></tr>
+  <tr><td>GET</td><td><code>/clips/:id</code></td><td>—</td><td>stream; <code>?download=1</code> registra download se sem Range</td></tr>
+  <tr><td>GET</td><td><code>/clips/:id/thumb.jpg</code></td><td>—</td><td>JPEG</td></tr>
+  <tr><td>GET</td><td><code>/brand/:venueId/logo?v=</code></td><td>—</td><td>logo</td></tr>
+  <tr><td>GET</td><td><code>/v/:id</code></td><td>—</td><td>SPA + og:title/image p/ WhatsApp</td></tr>
+  <tr><td>GET</td><td><code>/c/:key</code></td><td>—</td><td>301 → <code>/q/:key</code></td></tr>
+  <tr><td>GET</td><td><code>/courts/:publicKey/clips</code></td><td>—</td><td>legado; front usa <code>/api/...</code></td></tr>
+  <tr><td>GET</td><td><code>/acesso/:token</code> · <code>/a/:token</code></td><td>—</td><td>legado → 302 <code>/arena/entrar</code></td></tr>
+</table>
+<p>Janela do dia na query de clips: <code>created_at</code> UTC convertido com <code>+3 hours</code> para BRT, <code>date</code> obrigatório <code>YYYY-MM-DD</code>.</p>
+<p>Eventos de view/download/share: IP vira SHA-256(<code>ip|hojeBRT|IP_HASH_SALT</code>) — não rastreia entre dias.</p>
+
+<h3>7.2 Edge (Pi)</h3>
+<p>Middleware: Bearer = token do device, hash comparado com <code>devices.token_hash</code>, <code>revoked_at IS NULL</code>.</p>
+<table>
+  <tr><th>Método</th><th>Path</th><th>Notas</th></tr>
+  <tr><td>POST</td><td><code>/edge/clips/upload-slot</code></td><td>Idempotente por clip_id UUID. Court tem que ser da mesma venue do device. <code>recorded_at</code> só se ISO nos últimos 24 h.</td></tr>
+  <tr><td>PUT</td><td><code>/edge/clips/:clipId/content</code></td><td>Só se status ainda <code>pending</code>; senão 409. Marca <code>ready</code>, grava bytes, evento <code>created</code> com a hora do lance.</td></tr>
+  <tr><td>PUT</td><td><code>/edge/clips/:clipId/thumbnail</code></td><td>Máx. 1 MB</td></tr>
+  <tr><td>POST</td><td><code>/edge/heartbeat</code></td><td>Atualiza <code>last_seen_at</code>, <code>last_payload</code>, <code>agent_version</code>. Histórico em <code>heartbeats</code> só a cada 15 min ou se houver anomalia. Eventos → <code>device_events</code>.</td></tr>
+</table>
+
+<h3>7.3 Admin (<code>/admin</code>, UI em <code>/painel</code>)</h3>
+<p>Login: <code>POST /admin/session</code> com <code>{ email, password }</code> (conta <code>role=admin</code>). Cookie <code>rs_admin</code> assinado com <code>SESSION_SECRET</code> (HMAC 8 h, Secure, HttpOnly, SameSite=Strict). Bearer <code>ADMIN_TOKEN</code> ainda vale pra scripts. Mutação via cookie exige JSON (anti form CSRF).</p>
+<table>
+  <tr><th>Método</th><th>Path</th></tr>
+  <tr><td>POST/GET/DELETE</td><td><code>/admin/session</code></td></tr>
+  <tr><td>GET</td><td><code>/admin/overview</code></td></tr>
+  <tr><td>GET/POST</td><td><code>/admin/venues</code></td></tr>
+  <tr><td>GET/PATCH</td><td><code>/admin/venues/:id</code></td></tr>
+  <tr><td>POST/PATCH/DELETE</td><td><code>/admin/venues/:id/accounts</code> · <code>.../accounts/:accountId</code></td></tr>
+  <tr><td>PUT/DELETE</td><td><code>/admin/venues/:id/contract</code></td></tr>
+  <tr><td>POST</td><td><code>/admin/venues/:id/courts</code></td></tr>
+  <tr><td>PATCH</td><td><code>/admin/courts/:id</code></td></tr>
+  <tr><td>POST/GET</td><td><code>/admin/devices</code></td></tr>
+  <tr><td>GET</td><td><code>/admin/devices/:id/events</code></td></tr>
+  <tr><td>POST</td><td><code>/admin/devices/:id/revoke</code></td></tr>
+  <tr><td>GET/POST</td><td><code>/admin/equipment</code></td></tr>
+  <tr><td>PATCH</td><td><code>/admin/equipment/:id</code></td></tr>
+  <tr><td>GET</td><td><code>/admin/equipment/:id/events</code></td></tr>
+  <tr><td>GET</td><td><code>/admin/invoices</code></td></tr>
+  <tr><td>POST</td><td><code>/admin/invoices/:id/pay|void|reopen</code></td></tr>
+  <tr><td>GET/DELETE</td><td><code>/admin/clips</code> · <code>/admin/clips/:clipId</code></td></tr>
+</table>
+<p>UI admin: Visão geral, Arenas (detalhe com abas resumo/quadras/dispositivos/equipamentos/financeiro/clips), Equipamentos, Financeiro, Dispositivos. Sem auto-refresh na visão geral (query refetch só no foco). Métrica no card do device: taxa aperto→clip 7 dias + eventos recentes.</p>
+<p>Status de arena: <code>onboarding | active | paused | churned</code>.</p>
+<p><code>public_key</code> de quadra: 3–32 chars <code>a-z0-9-</code>, único.</p>
+
+<h3>7.4 Portal da arena (<code>/portal</code>, UI em <code>/arena</code>)</h3>
+<p>Cookie de sessão a partir de <code>/a/:token</code>. Token do link é hasheado; dá para revogar. <code>noindex</code>.</p>
+<table>
+  <tr><th>Método</th><th>Path</th><th>UI</th></tr>
+  <tr><td>POST/DELETE</td><td><code>/portal/session</code></td><td>login email/senha · sair</td></tr>
+  <tr><td>GET</td><td><code>/portal/me</code></td><td>inclui email da conta</td></tr>
+  <tr><td>GET</td><td><code>/portal/overview</code></td><td><code>/arena</code></td></tr>
+  <tr><td>GET</td><td><code>/portal/courts</code></td><td><code>/arena/quadras</code> (QR, URL <code>/q/...</code>)</td></tr>
+  <tr><td>GET</td><td><code>/portal/devices</code></td><td><code>/arena/status</code> (online/offline, último clip — sem token)</td></tr>
+  <tr><td>GET/DELETE</td><td><code>/portal/clips</code></td><td><code>/arena/clips</code> (dono pode apagar)</td></tr>
+  <tr><td>GET</td><td><code>/portal/invoices</code></td><td><code>/arena/faturas</code></td></tr>
+  <tr><td>PATCH/PUT/DELETE</td><td><code>/portal/branding</code> (+ logo)</td><td><code>/arena/personalizar</code></td></tr>
+</table>
+<p>Marca: <code>public_name</code> ≤ 60; cores permitidas <code>#d7ff3a #ffd23f #ff9f43 #ff7a7a #ff7ac0 #b99aff #4dd4ff #3ee6a0</code>. Logo PNG/JPEG/WebP, magic-bytes checados, sem SVG (XSS).</p>
+<p>Equipamentos no admin (inventário, não no portal): kinds <code>camera | pi | switch | esp32 | button | adapter | other</code>; status <code>stock | installed | maintenance | lost | retired</code>.</p>
+<p>Faturas: contrato com <code>monthly_cents</code> + <code>due_day</code> 1–28; cron/ensure gera período <code>YYYY-MM</code>; status <code>open | paid | void</code>.</p>
+
+<h2>8. Front público</h2>
+<p>React 19, Vite 8, Tailwind 4, React Router 7, TanStack Query. Fontes Inter + Barlow Condensed.</p>
+<table>
+  <tr><th>Rota</th><th>Página</th><th>Comportamento</th></tr>
+  <tr><td><code>/</code></td><td>Home</td><td>Formulário “código da quadra” → <code>/q/...</code></td></tr>
+  <tr><td><code>/q/:key</code></td><td>CourtPage</td><td>Hero, DayPicker, featured de hoje, HourGroup, poll 15 s se hoje, toast de clip novo. Nome da arena linka para <code>/g/{venue_key}</code></td></tr>
+  <tr><td><code>/q/:key/qr</code></td><td>QrPage</td><td>Cartaz (lazy)</td></tr>
+  <tr><td><code>/g/:key</code></td><td>VenuePage</td><td>Todos os clips da arena; chips de quadra (<code>?court=</code>); badge da quadra no card</td></tr>
+  <tr><td><code>/v/:id</code></td><td>ClipPage</td><td>Player 9:16, baixar, share, “mais da quadra”</td></tr>
+  <tr><td><code>/painel/*</code></td><td>AdminApp</td><td>lazy</td></tr>
+  <tr><td><code>/arena/*</code></td><td>ArenaApp</td><td>lazy; queries sem refetch no foco</td></tr>
+</table>
+<p>Clips novos: <code>isFresh</code> = hoje e horário local há menos de 10 min → selo “Novo”. ViewTransition thumb→player. Share dispara evento <code>share</code>.</p>
+<p>Empty state ensina o botão. Footer: “Atualiza sozinho a cada 15s”.</p>
+
+<h2>9. Modelo de dados (D1)</h2>
+<p>Migrações 0001–0008. Tabelas efetivas:</p>
+<table>
+  <tr><th>Tabela</th><th>Papel</th></tr>
+  <tr><td><code>venues</code></td><td>Arena. Campos extra: city, contato, status, notes, public_name, brand_color, logo_key, public_key (slug <code>/g</code>)</td></tr>
+  <tr><td><code>courts</code></td><td>Quadra. <code>public_key</code> único (QR)</td></tr>
+  <tr><td><code>clips</code></td><td>id UUID, court_id, object_key, thumb_key, status pending/ready, bytes, device_id, created_at (= hora do lance), ready_at, expires_at</td></tr>
+  <tr><td><code>clip_events</code></td><td>created/view/download/share + ip_hash</td></tr>
+  <tr><td><code>devices</code></td><td>Pi. token_hash, agent_version, last_seen_at, last_payload, revoked_at</td></tr>
+  <tr><td><code>heartbeats</code></td><td>Amostra 15 min / anomalia</td></tr>
+  <tr><td><code>device_events</code></td><td>press/clip_ok/clip_fail/ffmpeg_restart/boot/queue_drop</td></tr>
+  <tr><td><code>alerts</code></td><td>Aberto único por (device, kind)</td></tr>
+  <tr><td><code>contracts</code> / <code>invoices</code></td><td>Mensalidade</td></tr>
+  <tr><td><code>equipment</code> / <code>equipment_events</code></td><td>Inventário físico</td></tr>
+  <tr><td><code>accounts</code></td><td>Email/senha admin + portal arena (PBKDF2)</td></tr>
+  <tr><td><code>venue_access_links</code></td><td>Legado (não usado)</td></tr>
+  <tr><td><code>audit_log</code></td><td>Ações do portal/admin</td></tr>
+</table>
+<p>Seed: <code>venue-demo</code> “Arena Demo”; court <code>demo01</code> “Quadra 01”; <code>venues.public_key = demo</code> → <code>/g/demo</code>.</p>
+<p><code>0002_replay_requests</code> foi substituído pelo fluxo device/slot; a tabela foi dropada em 0003.</p>
+
+<h2>10. Autenticação e segurança (o que o código faz)</h2>
+<ul>
+  <li>Token do Pi nunca é persistido em claro; só SHA-256.</li>
+  <li>Admin token comparado em tempo constante (hash + <code>timingSafeEqual</code>).</li>
+  <li>Sessões admin/portal: HMAC de <code>accountId.exp</code> com chave derivada de <code>SESSION_SECRET</code> (scopes separados). Conta desativada invalida no próximo request.</li>
+  <li>Link da arena: token aleatório, guarda hash; Referrer-Policy no redirect; cookie de portal.</li>
+  <li>API local do agent bound a 127.0.0.1 — não entra no túnel Cloudflare.</li>
+  <li>R2 privado; Range requests no GET do MP4.</li>
+  <li>Logo sem SVG.</li>
+  <li>IP de analytics hasheado com sal + dia.</li>
+  <li><code>/painel</code> e <code>/arena</code> mandam <code>noindex, nofollow</code>.</li>
+  <li>Galeria <code>/q</code> e <code>/g</code> são públicas: é o produto do QR.</li>
+</ul>
+
+<h2>11. Observabilidade</h2>
+<ul>
+  <li>Worker: observability + traces no wrangler.</li>
+  <li>Painel: device online se last_seen &lt; 180 s; issues do último payload.</li>
+  <li>Cron 5 min: alerta persistido (mesmo sem e-mail).</li>
+  <li>Pi: journalctl; health local; temp/throttle no heartbeat.</li>
+</ul>
+<p>Com e-mail desligado, “envio” retorna sucesso no log <code>email_skipped</code> para o alerta não ficar pendente para sempre.</p>
+
+<h2>12. Mapa do repositório (implementado)</h2>
+<table>
+  <tr><th>Path</th><th>Conteúdo</th></tr>
+  <tr><td><code>src/index.ts</code></td><td>Worker: público + edge + crons + OG</td></tr>
+  <tr><td><code>src/admin.ts</code></td><td>API do painel</td></tr>
+  <tr><td><code>src/arena.ts</code></td><td>API do portal</td></tr>
+  <tr><td><code>src/auth.ts</code></td><td>edge / admin / arena sessions</td></tr>
+  <tr><td><code>src/jobs.ts</code></td><td>alertas, purge, faturas, resumo</td></tr>
+  <tr><td><code>src/queries.ts</code></td><td>SQL compartilhado, brand, issues</td></tr>
+  <tr><td><code>src/lib.ts</code></td><td>BRT, hash, retention</td></tr>
+  <tr><td><code>web/src/pages/*</code></td><td>Home, Court, Venue, Clip, Qr</td></tr>
+  <tr><td><code>web/src/admin/*</code></td><td>Painel</td></tr>
+  <tr><td><code>web/src/arena/*</code></td><td>Portal</td></tr>
+  <tr><td><code>edge/agent.mjs</code></td><td>Borda</td></tr>
+  <tr><td><code>edge/pi/*</code></td><td>install, unit, udev, update.ps1</td></tr>
+  <tr><td><code>firmware/button/button.ino</code></td><td>ESP32</td></tr>
+  <tr><td><code>migrations/0001–0008</code></td><td>Schema</td></tr>
+  <tr><td><code>scripts/create-device.mjs</code></td><td>Emite EDGE_TOKEN</td></tr>
+  <tr><td><code>wrangler.jsonc</code></td><td>Bindings e crons</td></tr>
+</table>
+<p>Também existem <code>edge/loadtest-6cam.mjs</code> e scripts e2e no repo (ferramentas de teste, não o serviço de produção).</p>
+
+<h2>13. Operação do piloto — checklist</h2>
+<ol>
+  <li>Pi ligada, Wi‑Fi ok, cabo no switch, cam no PoE.</li>
+  <li><code>systemctl is-active replay-agent</code> = active.</li>
+  <li><code>curl 127.0.0.1:8788/health</code> → <code>buffer_alive: true</code>, <code>busy: false</code>. Após boot, ~25 s de warm.</li>
+  <li>ESP em <code>/dev/replay-button</code>. LED GPIO 2 <strong>fixo</strong> = HB/ACK.</li>
+  <li>Aperto: GPIO 4 no GND. LED pisca → clip → 3 piscadas.</li>
+  <li>Conferência: <code>/q/demo01</code> ou <code>/g/demo</code>.</li>
+  <li>Simular sem botão: <code>POST http://127.0.0.1:8788/local/replay</code> via SSH.</li>
+</ol>
+<p>Offline no painel: 3 min sem heartbeat. Alerta de cron: 10 min. Filas: 0 no health = upload em dia.</p>
+<p>Desligar Pi/câmeras é seguro. Clips já no R2 continuam até expirar. Ao religar, o agent aquece o buffer e o alerta offline fecha sozinho no cron.</p>
+
+<div class="note">
+  <strong>Limite explícito deste documento.</strong> Não descreve live (YouTube/Instagram), NVR 24h, transcode na nuvem, troca da Pi, VLAN, nem segundo agent em systemd. Isso não está implementado. O que está no ar é o pipeline botão → buffer → MP4 → R2 → galeria 7 dias, com painel e portal da arena.
+</div>
+
+<p class="small">Fim do guia. Código de referência: <code>edge/agent.mjs</code> v0.4.5, <code>firmware/button/button.ino</code>, <code>src/index.ts</code>, <code>wrangler.jsonc</code>, migrações 0001–0008.</p>
+
+</body>
+</html>

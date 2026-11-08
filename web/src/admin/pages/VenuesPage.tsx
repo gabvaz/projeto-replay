@@ -67,7 +67,7 @@ export function VenuesPage() {
               <Link
                 key={v.id}
                 to={`/painel/arenas/${v.id}`}
-                className="group rounded-2xl border border-line bg-surface p-4 transition hover:border-lime/40"
+                className="group rounded-2xl border border-line bg-surface p-4 transition hover:border-white/30"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -79,7 +79,7 @@ export function VenuesPage() {
                   <div className="flex items-center gap-2">
                     {v.overdue_count > 0 && <Badge tone="red">{v.overdue_count} em atraso</Badge>}
                     <Badge tone={STATUS_TONE[v.status]}>{VENUE_STATUS_LABEL[v.status]}</Badge>
-                    <ChevronRight className="size-4 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-lime" />
+                    <ChevronRight className="size-4 text-zinc-600 transition group-hover:translate-x-0.5 group-hover:text-white" />
                   </div>
                 </div>
                 <dl className="mt-4 grid grid-cols-4 gap-2 text-center">

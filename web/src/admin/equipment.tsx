@@ -72,7 +72,7 @@ export function EquipmentTable({ items, showVenue = true }: { items: EquipmentRo
               {showVenue && (
                 <td>
                   {e.venue_id ? (
-                    <Link to={`/painel/arenas/${e.venue_id}`} className="hover:text-lime">
+                    <Link to={`/painel/arenas/${e.venue_id}`} className="hover:text-white">
                       {e.venue_name}
                     </Link>
                   ) : (
@@ -319,7 +319,7 @@ function HistoryModal({ item, onClose }: { item: EquipmentRow; onClose: () => vo
         <ol className="relative ml-2 border-l border-line">
           {q.data.events.map((ev) => (
             <li key={ev.id} className="mb-4 ml-4">
-              <span className="absolute -left-1.5 mt-1.5 size-3 rounded-full border-2 border-surface bg-lime" />
+              <span className="absolute -left-1.5 mt-1.5 size-3 rounded-full border-2 border-surface bg-ready" />
               <p className="text-sm">
                 <span className="font-semibold">{EVENT_LABEL[ev.type]}</span>
                 {ev.venue_name && <span className="text-zinc-400"> · {ev.venue_name}</span>}

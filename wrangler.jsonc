@@ -36,21 +36,31 @@
       "/clips/*",
       "/courts/*",
       "/c/*",
+      "/q/*",
+      "/g/*",
       "/v/*",
+      "/replay/*",
       "/portal/*",
       "/a/*",
+      "/acesso/*",
       "/brand/*",
       "/__scheduled"
     ]
   },
+  // Domínio próprio (CF cria DNS + cert). workers.dev continua como fallback.
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "loopreplay.com.br", "custom_domain": true },
+    { "pattern": "www.loopreplay.com.br", "custom_domain": true }
+  ],
   "vars": {
     "RETENTION_DAYS": "7",
     // Sem heartbeat há mais que isso = offline (agent manda a cada 60s)
     "DEVICE_OFFLINE_SEC": "180",
     // WhatsApp de suporte mostrado no portal da arena (só dígitos, com DDI). Vazio = esconde.
     "SUPPORT_WHATSAPP": "",
-    // Links nos e-mails de alerta
-    "APP_URL": "https://projeto-replay.gabrieltenoriovaz-10a.workers.dev",
+    // Links nos e-mails de alerta / URLs canônicas
+    "APP_URL": "https://loopreplay.com.br",
     // Remetente precisa ser do domínio com Email Routing; destino, endereço verificado nele.
     // Vazio = alerta/resumo só no log (wrangler tail).
     "ALERT_EMAIL_FROM": "",

@@ -39,7 +39,7 @@ export function ClipThumb({ clip, transitioning }: { clip: ClipSummary; transiti
 }
 
 export function ClipCard({ clip, isToday, delay = 0, className = "", morph = true }: Props) {
-  const to = `/v/${clip.id}`;
+  const to = `/replay/${clip.id}`;
   const transitioning = useViewTransitionState(to) && morph;
   const fresh = isFresh(clip.time_local, isToday);
 
@@ -49,27 +49,25 @@ export function ClipCard({ clip, isToday, delay = 0, className = "", morph = tru
       state={{ thumb: clip.thumb_url }}
       viewTransition
       style={{ animationDelay: `${delay}ms` }}
-      className={`group animate-rise-in relative block aspect-[9/16] overflow-hidden rounded-xl bg-surface ring-1 sm:rounded-2xl ring-line transition hover:ring-lime/60 active:scale-[0.98] ${className}`}
+      className={`group animate-rise-in relative block aspect-[9/16] overflow-hidden rounded-xl bg-surface ring-1 sm:rounded-2xl ring-line transition hover:ring-white/30 active:scale-[0.98] ${className}`}
     >
       <ClipThumb clip={clip} transitioning={transitioning} />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-transparent" />
       <div className="absolute top-2 left-2 flex flex-col items-start gap-1">
         {fresh && (
-          <span className="rounded-full bg-lime px-2 py-0.5 text-[10px] font-black tracking-wider text-ink uppercase">
-            Novo
+          <span className="font-mono rounded-full bg-rec px-2 py-0.5 text-[10px] font-medium tracking-wider text-white">
+            NOVO
           </span>
         )}
         {clip.court_name && (
-          <span className="max-w-[9rem] truncate rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase backdrop-blur">
+          <span className="font-mono max-w-[9rem] truncate rounded-full bg-black/55 px-2 py-0.5 text-[10px] font-medium tracking-wide text-white backdrop-blur">
             {clip.court_name}
           </span>
         )}
       </div>
       <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 p-2 sm:p-3">
-        <span className="font-display text-2xl leading-none font-extrabold tabular-nums sm:text-3xl">
-          {clip.time_local}
-        </span>
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white/15 backdrop-blur transition group-hover:bg-lime group-hover:text-ink sm:size-9">
+        <span className="font-mono text-2xl leading-none tabular-nums sm:text-3xl">{clip.time_local}</span>
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-white/15 backdrop-blur transition group-hover:bg-white group-hover:text-ink sm:size-9">
           <Play className="size-3.5 translate-x-px fill-current sm:size-4" />
         </span>
       </div>

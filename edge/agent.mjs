@@ -75,7 +75,7 @@ await loadDotEnv(path.join(__dirname, ".env"));
 
 const API_BASE = (
   process.env.API_BASE ??
-  "https://projeto-replay.gabrieltenoriovaz-10a.workers.dev"
+  "https://loopreplay.com.br"
 ).replace(/\/$/, "");
 const COURT_KEY = process.env.COURT_KEY ?? "demo01";
 const EDGE_TOKEN = process.env.EDGE_TOKEN?.trim() || "";
@@ -613,7 +613,7 @@ function flushOutbox() {
           uploadFailures = 0;
           nextUploadAt = 0;
           pushEvent("clip_ok", entry.clip_id);
-          log("enviado:", `${API_BASE}/v/${entry.clip_id}`);
+          log("enviado:", `${API_BASE}/replay/${entry.clip_id}`);
         } catch (err) {
           if (err instanceof PermanentError) {
             await removeEntry(entry.clip_id);
@@ -688,8 +688,8 @@ async function replayAndUpload(source) {
   return {
     ...result,
     queued: existsSync(entryPath(result.clip_id, "json")),
-    gallery: `${API_BASE}/q/${COURT_KEY}`,
-    play: `${API_BASE}/v/${result.clip_id}`,
+    gallery: `${API_BASE}/quadra/${COURT_KEY}`,
+    play: `${API_BASE}/replay/${result.clip_id}`,
   };
 }
 
@@ -908,7 +908,7 @@ function startHeartbeat() {
 /* ---------------------------------------------------------------- UI local */
 
 function localRecordPage() {
-  const gallery = `${API_BASE}/q/${COURT_KEY}`;
+  const gallery = `${API_BASE}/quadra/${COURT_KEY}`;
   return `<!doctype html>
 <html lang="pt-BR">
 <head>

@@ -30,7 +30,7 @@ export function HomePage() {
                 type="button"
                 onClick={() => setDays(p)}
                 className={`rounded-md px-3 py-1 text-xs font-semibold transition ${
-                  p === days ? "bg-lime text-ink" : "text-zinc-400 hover:text-white"
+                  p === days ? "bg-white text-ink" : "text-zinc-400 hover:text-white"
                 }`}
               >
                 {p}d
@@ -45,7 +45,7 @@ export function HomePage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi label="Clips" value={num(t.created)} hint={`últimos ${days} dias`} tone="lime" />
+            <Kpi label="Clips" value={num(t.created)} hint={`últimos ${days} dias`} tone="ready" />
             <Kpi label="Views" value={num(t.view)} hint={perClip ? `${perClip} por clip` : undefined} />
             <Kpi label="Downloads" value={num(t.download)} hint={`${num(t.share)} compartilhamentos`} />
             <Kpi label="Jogadores" value={num(o.unique_daily_visitors)} hint="visitas únicas por dia" />
